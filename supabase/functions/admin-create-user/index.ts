@@ -1,7 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+const configuredAppUrl = Deno.env.get('APP_URL')
+const configuredAppOrigin = (() => {
+  try { return configuredAppUrl ? new URL(configuredAppUrl).origin : undefined } catch { return undefined }
+})()
+
 const allowedOrigins = [
-  Deno.env.get('APP_URL')?.replace(/\/$/, ''),
+  configuredAppOrigin,
+  'https://hanzkassik.github.io',
   'http://localhost:5173',
   'http://localhost:5174',
   'http://127.0.0.1:5173',
@@ -94,7 +100,7 @@ Deno.serve(async (request) => {
     if (eventError || !selectedEvent) return json({ error: 'Evento não encontrado ou inativo.' }, 400, requestOrigin)
   }
 
-  const appUrl = Deno.env.get('APP_URL')?.replace(/\/$/, '') || requestOrigin
+  const appUrl = configuredAppUrl?.replace(/\/$/, '') || requestOrigin
   const { data: invited, error: inviteError } = await adminClient.auth.admin.inviteUserByEmail(email, {
     data: { nome, cpf: cpf || null, telefone, data_nascimento: dataNascimento || null },
     redirectTo: appUrl,

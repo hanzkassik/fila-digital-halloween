@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { EventRow, Profile, QueueRow } from '../../types'
-import ProfilePage from './ProfilePage'
+import ProfilePage from '../profile/ProfilePage'
 import AdminCreateUserModal from './components/AdminCreateUserModal'
 import AddToQueueModal from './components/AddToQueueModal'
 import UsersPage from './UsersPage'
@@ -13,6 +13,10 @@ const statuses: Record<string, string> = { 'na fila': 'Na fila', 'em atendimento
 const methods: Record<string, string> = { pix: 'Pix', dinheiro: 'Dinheiro', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', transferencia: 'Transferência', outro: 'Outro' }
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
 const eventImagesBucket = 'fila-digital-halloween'
+const createUserDraftOpenKey = 'fila-admin-create-user-open'
+function hasRestorableCreateUserModal() {
+  try { return sessionStorage.getItem(createUserDraftOpenKey) === '1' } catch { return false }
+}
 const isMissingFaviconColumn = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
   const details = error as { code?: string; message?: string }
@@ -70,11 +74,12 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [events, setEvents] = useState<EventRow[]>([])
   const [eventsLoading, setEventsLoading] = useState(true)
   const [queue, setQueue] = useState<QueueRow[]>([])
+  const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([])
   const [queueLoading, setQueueLoading] = useState(false)
   const [selectedPerson, setSelectedPerson] = useState<QueueRow | null>(null)
   const [calledPerson, setCalledPerson] = useState<QueueRow | null>(null)
   const [eventModalOpen, setEventModalOpen] = useState(false)
-  const [createUserOpen, setCreateUserOpen] = useState(false)
+  const [createUserOpen, setCreateUserOpen] = useState(hasRestorableCreateUserModal)
   const [addQueueOpen, setAddQueueOpen] = useState(false)
   const [createUserEventId, setCreateUserEventId] = useState<string | undefined>()
   const [eventForm, setEventForm] = useState<Partial<EventRow>>({ status: 'ativo' })
@@ -85,6 +90,18 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+
+  function openCreateUser(eventId?: string) {
+    try { sessionStorage.setItem(createUserDraftOpenKey, '1') } catch { /* Modal segue funcionando sem persistência. */ }
+    setCreateUserEventId(eventId)
+    setCreateUserOpen(true)
+  }
+
+  function closeCreateUser() {
+    try { sessionStorage.removeItem(createUserDraftOpenKey); sessionStorage.removeItem('fila-admin-create-user-draft') } catch { /* Modal segue funcionando sem persistência. */ }
+    setCreateUserOpen(false)
+    setCreateUserEventId(undefined)
+  }
 
   const selectedEvent = events.find((event) => event.id === routeEventId) ?? null
 
@@ -124,6 +141,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     const people = (result.data ?? []) as Profile[]
     const populated = rows.map((row) => ({ ...row, profile: people.find((person) => person.id === row.usuario_id) }))
     setQueue(populated)
+    const loadedIds = new Set(populated.map((row) => row.id))
+    setSelectedQueueIds((current) => current.filter((id) => loadedIds.has(id)))
     setQueueLoading(false)
     return populated
   }, [])
@@ -216,12 +235,13 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     const form = new FormData(event.currentTarget)
     setBusy(true); setError('')
     try {
-      const { error: updateError } = await supabase.from('event_queue').update({
-        status: String(form.get('status')),
-        pago: form.get('pago') === 'on',
-        forma_pagamento: String(form.get('forma_pagamento') || '') || null,
-        valor_pagamento: Number(form.get('valor_pagamento') || 0),
-      }).eq('id', selectedPerson.id)
+      const { error: updateError } = await supabase.rpc('admin_update_queue_entry', {
+        p_queue_id: selectedPerson.id,
+        p_status: String(form.get('status')),
+        p_pago: form.get('pago') === 'on',
+        p_forma_pagamento: String(form.get('forma_pagamento') || '') || null,
+        p_valor_pagamento: Number(form.get('valor_pagamento') || 0),
+      })
       if (updateError) throw updateError
       setSelectedPerson(null); await loadQueue(selectedEvent)
     } catch (caught) { setError(errorMessage(caught, 'Não foi possível atualizar a fila.')) }
@@ -255,6 +275,28 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     finally { setBusy(false) }
   }
 
+  async function deleteSelectedQueueEntries() {
+    if (!supabase || !selectedEvent || selectedQueueIds.length === 0) return
+    const ids = [...selectedQueueIds]
+    if (!window.confirm(`Excluir ${ids.length} ${ids.length === 1 ? 'item' : 'itens'} selecionado${ids.length === 1 ? '' : 's'} da fila? Esta ação não pode ser desfeita.`)) return
+    setBusy(true); setError(''); setMessage('')
+    try {
+      const { data, error: deleteError } = await supabase.rpc('admin_delete_queue_entries', {
+        p_evento_id: selectedEvent.id,
+        p_queue_ids: ids,
+      })
+      if (deleteError) throw deleteError
+      const deleted = (data ?? []) as { deleted_id: string; deleted_order: number }[]
+      setSelectedQueueIds([])
+      await loadQueue(selectedEvent)
+      setMessage(deleted.length === ids.length
+        ? `${deleted.length} ${deleted.length === 1 ? 'item excluído' : 'itens excluídos'} em ordem decrescente da fila.`
+        : `${deleted.length} de ${ids.length} itens foram excluídos; os demais não estavam mais nesta fila.`)
+    } catch (caught) {
+      setError(errorMessage(caught, 'Não foi possível excluir os itens selecionados.'))
+    } finally { setBusy(false) }
+  }
+
   return <main className="dashboard">
     <aside className="sidebar">
       <a className="brand" href="/events" onClick={(event) => { event.preventDefault(); navigate('/events') }}>🎃 fila<span>do</span><br /> halloween</a>
@@ -272,12 +314,12 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
       <header className="mobile-top"><button className="brand" onClick={() => navigate('/events')}>🎃 filad<span>o</span>halloween</button><button className="mobile-users" onClick={() => navigate('/users')}>♙ Usuários</button><button className="mobile-profile" onClick={() => navigate('/profile')}>Perfil</button>{themeToggle}</header>
       <div className="page-title">
         <div><small className="eyebrow">PAINEL ADMINISTRATIVO</small><h1>{activeView === 'profile' ? 'Meu perfil' : activeView === 'users' ? userId ? 'Detalhes do usuário' : 'Usuários cadastrados' : selectedEvent?.nome ?? (routeEventId ? eventsLoading ? 'Carregando evento...' : 'Evento não encontrado' : 'Boa noite, ' + profile.nome.split(' ')[0])}</h1><p>{activeView === 'profile' ? 'Gerencie seus dados pessoais e de acesso.' : activeView === 'users' ? 'Consulte cadastros e participações por evento.' : selectedEvent ? 'Organize a fila deste evento.' : routeEventId ? 'Verifique o link ou volte para a lista de eventos.' : 'Gerencie seus eventos e acompanhe as filas.'}</p></div>
-        {activeView === 'profile' ? <button className="secondary" onClick={() => navigate('/events')}>← Voltar ao painel</button> : activeView === 'users' ? userId ? <button className="secondary" onClick={() => navigate('/users')}>← Usuários</button> : <button className="secondary create-user-button" onClick={() => { setCreateUserEventId(undefined); setCreateUserOpen(true) }}>＋ Criar usuário</button> : <div className="page-actions"><button className="secondary create-user-button" onClick={() => { setCreateUserEventId(undefined); setCreateUserOpen(true) }}>＋ Criar usuário</button>{selectedEvent || routeEventId ? <button className="secondary" onClick={() => navigate('/events')}>← Eventos</button> : <button className="primary" onClick={() => { setEventForm({ status: 'ativo' }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>＋ Criar evento</button>}</div>}
+        {activeView === 'profile' ? <button className="secondary" onClick={() => navigate('/events')}>← Voltar ao painel</button> : activeView === 'users' ? userId ? <button className="secondary" onClick={() => navigate('/users')}>← Usuários</button> : <button className="secondary create-user-button" onClick={() => openCreateUser()}>＋ Criar usuário</button> : <div className="page-actions"><button className="secondary create-user-button" onClick={() => openCreateUser(routeEventId)}>＋ Criar usuário</button>{selectedEvent || routeEventId ? <button className="secondary" onClick={() => navigate('/events')}>← Eventos</button> : <button className="primary" onClick={() => { setEventForm({ status: 'ativo' }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>＋ Criar evento</button>}</div>}
       </div>
       {error && <div className="error alert">{error}<button onClick={() => setError('')}>×</button></div>}
       {message && <div className="notice alert">{message}<button onClick={() => setMessage('')}>×</button></div>}
 
-      {activeView === 'profile' ? <ProfilePage profile={profile} onProfileUpdated={onProfileUpdated} /> : activeView === 'users' ? <UsersPage userId={userId} onUserSelect={(id) => navigate('/users/' + encodeURIComponent(id))} onBack={() => navigate('/users')} /> : !selectedEvent && routeEventId ? eventsLoading ? <div className="empty"><span>🎃</span><p>Carregando evento...</p></div> : <div className="empty"><span>🕸️</span><h3>Evento não encontrado</h3><button className="secondary" onClick={() => navigate('/events')}>Voltar para eventos</button></div> : !selectedEvent ? <>
+      {activeView === 'profile' ? <ProfilePage profile={profile} onProfileUpdated={onProfileUpdated} onLogout={onLogout} /> : activeView === 'users' ? <UsersPage userId={userId} onUserSelect={(id) => navigate('/users/' + encodeURIComponent(id))} onBack={() => navigate('/users')} /> : !selectedEvent && routeEventId ? eventsLoading ? <div className="empty"><span>🎃</span><p>Carregando evento...</p></div> : <div className="empty"><span>🕸️</span><h3>Evento não encontrado</h3><button className="secondary" onClick={() => navigate('/events')}>Voltar para eventos</button></div> : !selectedEvent ? <>
         <div className="stats">
           <article><span>✦</span><small>Eventos ativos</small><b>{events.filter((event) => event.status === 'ativo').length}</b></article>
           <article><span>☷</span><small>Eventos no total</small><b>{events.length}</b></article>
@@ -296,20 +338,28 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
           <button className="call-next" disabled={busy || queueLoading || selectedEvent.status !== 'ativo'} onClick={() => void callNext()}>📣 <b>{busy ? 'Chamando...' : 'Chamar próximo'}<small>Avançar em ordem da fila</small></b> →</button>
         </div>
         <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
+        {!queueLoading && queue.length > 0 && <div className="queue-selection-toolbar">
+          <label><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> Selecionar todos</label>
+          <span>{selectedQueueIds.length} selecionado{selectedQueueIds.length === 1 ? '' : 's'}</span>
+          {selectedQueueIds.length > 0 && <button className="danger-outline queue-delete-button" disabled={busy} onClick={() => void deleteSelectedQueueEntries()}>{busy ? 'Excluindo...' : `Excluir selecionados (${selectedQueueIds.length})`}</button>}
+        </div>}
         {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : queue.length ? <div className="queue-list">{queue.map((item) =>
-          <button key={item.id} className={'queue-row ' + (item.status === 'em atendimento' ? 'currently-serving' : '')} onClick={() => setSelectedPerson(item)}>
-            <b className="position">{String(item.ordem_fila).padStart(2, '0')}</b><span className="person-avatar">{item.profile?.nome?.[0]?.toUpperCase() ?? '?'}</span>
-            <span className="person-name"><b>{item.profile?.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.usuario_id}</small></span>
-            <span className={item.pago ? 'paid' : 'unpaid'}>{item.pago ? '✓ Pago' : '◷ Pendente'}</span>
-            <span className={'pill state-' + item.status.replaceAll(' ', '-')}>{statuses[item.status] ?? item.status}</span><span>›</span>
-          </button>
+          <div key={item.id} className={'queue-row ' + (item.status === 'em atendimento' ? 'currently-serving' : '')}>
+            <input className="queue-row-select" type="checkbox" checked={selectedQueueIds.includes(item.id)} onChange={(event) => setSelectedQueueIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} aria-label={`Selecionar senha ${item.ordem_fila}`} />
+            <button className="queue-row-content" onClick={() => setSelectedPerson(item)}>
+              <b className="position">{String(item.ordem_fila).padStart(2, '0')}</b><span className="person-avatar">{item.profile?.nome?.[0]?.toUpperCase() ?? '?'}</span>
+              <span className="person-name"><b>{item.profile?.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.usuario_id}</small></span>
+              <span className={item.pago ? 'paid' : 'unpaid'}>{item.pago ? '✓ Pago' : '◷ Pendente'}</span>
+              <span className={'pill state-' + item.status.replaceAll(' ', '-')}>{statuses[item.status] ?? item.status}</span><span className="chevron">›</span>
+            </button>
+          </div>
         )}</div> : <div className="empty"><span>🦇</span><h3>A fila está vazia</h3><p>As inscrições aparecerão aqui.</p></div>}
       </> }
     </section>
 
-    {createUserOpen && <AdminCreateUserModal events={events} initialEventId={createUserEventId ?? routeEventId} onClose={() => setCreateUserOpen(false)} onCreated={(email, eventId) => { setCreateUserOpen(false); setCreateUserEventId(undefined); setMessage(eventId ? 'Convite enviado para ' + email + ' e usuário adicionado à fila.' : 'Convite enviado para ' + email + '.'); if (selectedEvent && eventId === selectedEvent.id) void loadQueue(selectedEvent) }} />}
+    {createUserOpen && <AdminCreateUserModal events={events} initialEventId={createUserEventId ?? routeEventId} onClose={closeCreateUser} onCreated={(email, eventId) => { closeCreateUser(); setMessage(eventId ? 'Convite enviado para ' + email + ' e usuário adicionado à fila.' : 'Convite enviado para ' + email + '.'); if (selectedEvent && eventId === selectedEvent.id) void loadQueue(selectedEvent) }} />}
 
-    {addQueueOpen && selectedEvent && <AddToQueueModal event={selectedEvent} onClose={() => setAddQueueOpen(false)} onAdded={(name) => { setAddQueueOpen(false); setMessage(name + ' foi adicionado à fila.'); void loadQueue(selectedEvent) }} onCreateNew={() => { setAddQueueOpen(false); setCreateUserEventId(selectedEvent.id); setCreateUserOpen(true) }} />}
+    {addQueueOpen && selectedEvent && <AddToQueueModal event={selectedEvent} onClose={() => setAddQueueOpen(false)} onAdded={(name) => { setAddQueueOpen(false); setMessage(name + ' foi adicionado à fila.'); void loadQueue(selectedEvent) }} onCreateNew={() => { setAddQueueOpen(false); openCreateUser(selectedEvent.id) }} />}
 
     {eventModalOpen && <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setEventModalOpen(false) }}>
       <section className="modal"><header><div><small className="eyebrow">EVENTO</small><h2>{eventForm.id ? 'Editar evento' : 'Criar evento'}</h2></div><button onClick={() => setEventModalOpen(false)}>×</button></header>

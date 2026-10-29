@@ -1,7 +1,13 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
+const configuredAppUrl = Deno.env.get('APP_URL')
+const configuredAppOrigin = (() => {
+  try { return configuredAppUrl ? new URL(configuredAppUrl).origin : undefined } catch { return undefined }
+})()
+
 const allowedOrigins = [
-  Deno.env.get('APP_URL')?.replace(/\/$/, ''),
+  configuredAppOrigin,
+  'https://hanzkassik.github.io',
   'http://localhost:5173', 'http://localhost:5174',
   'http://127.0.0.1:5173', 'http://127.0.0.1:5174',
 ].filter((origin): origin is string => Boolean(origin))
@@ -40,7 +46,7 @@ Deno.serve(async (request) => {
   const { data: actor, error: actorError } = await admin.from('profiles').select('papel,status').eq('id', authData.user.id).maybeSingle()
   if (actorError || actor?.papel !== 'admin' || actor.status !== 'ativo') return json({ error: 'Administrator access required' }, 403, origin)
 
-  let body: { user_id?: string; nome?: string; cpf?: string; email?: string; telefone?: string; data_nascimento?: string | null; papel?: string; status?: string }
+  let body: { user_id?: string; nome?: string; cpf?: string | null; email?: string; telefone?: string; data_nascimento?: string | null; papel?: string; status?: string }
   try { body = await request.json() } catch { return json({ error: 'Invalid request body' }, 400, origin) }
   const userId = body.user_id?.trim() ?? ''
   const nome = body.nome?.trim() ?? ''
@@ -53,7 +59,7 @@ Deno.serve(async (request) => {
 
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId)) return json({ error: 'Usuário inválido.' }, 400, origin)
   if (nome.length < 2 || nome.length > 120) return json({ error: 'Informe um nome válido.' }, 400, origin)
-  if (!/^\d{11}$/.test(cpf)) return json({ error: 'Informe um CPF com 11 dígitos.' }, 400, origin)
+  if (cpf && !/^\d{11}$/.test(cpf)) return json({ error: 'Se informado, o CPF precisa ter 11 dígitos.' }, 400, origin)
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return json({ error: 'Informe um e-mail válido.' }, 400, origin)
   if (!/^\+[1-9]\d{7,14}$/.test(telefone)) return json({ error: 'Informe um telefone internacional válido.' }, 400, origin)
   if (papel !== 'admin' && papel !== 'user') return json({ error: 'Papel de usuário inválido.' }, 400, origin)
@@ -64,7 +70,9 @@ Deno.serve(async (request) => {
   if (targetError || !target) return json({ error: 'Usuário não encontrado.' }, 404, origin)
   const { data: emailDuplicate, error: emailDuplicateError } = await admin.from('profiles').select('id').neq('id', userId).eq('email', email).limit(1).maybeSingle()
   if (emailDuplicateError) return json({ error: 'Não foi possível validar o e-mail: ' + emailDuplicateError.message }, 400, origin)
-  const { data: cpfDuplicate, error: cpfDuplicateError } = await admin.from('profiles').select('id').neq('id', userId).eq('cpf', cpf).limit(1).maybeSingle()
+  const { data: cpfDuplicate, error: cpfDuplicateError } = cpf
+    ? await admin.from('profiles').select('id').neq('id', userId).eq('cpf', cpf).limit(1).maybeSingle()
+    : { data: null, error: null }
   if (cpfDuplicateError) return json({ error: 'Não foi possível validar o CPF: ' + cpfDuplicateError.message }, 400, origin)
   if (emailDuplicate || cpfDuplicate) return json({ error: 'Este e-mail ou CPF já está sendo usado por outro cadastro.' }, 409, origin)
 
@@ -72,16 +80,16 @@ Deno.serve(async (request) => {
     const { error: authUpdateError } = await admin.auth.admin.updateUserById(userId, {
       email,
       email_confirm: true,
-      user_metadata: { nome, cpf, telefone },
+      user_metadata: { nome, cpf: cpf || null, telefone },
     })
     if (authUpdateError) return json({ error: authUpdateError.message }, 400, origin)
   } else {
-    const { error: metadataError } = await admin.auth.admin.updateUserById(userId, { user_metadata: { nome, cpf, telefone } })
+    const { error: metadataError } = await admin.auth.admin.updateUserById(userId, { user_metadata: { nome, cpf: cpf || null, telefone } })
     if (metadataError) return json({ error: metadataError.message }, 400, origin)
   }
 
   const { error: profileError } = await admin.from('profiles').update({
-    nome, cpf, email, telefone, data_nascimento: nascimento, papel, status,
+    nome, cpf: cpf || null, email, telefone, data_nascimento: nascimento, papel, status,
   }).eq('id', userId)
   if (profileError) return json({ error: profileError.message }, 400, origin)
   return json({ ok: true }, 200, origin)

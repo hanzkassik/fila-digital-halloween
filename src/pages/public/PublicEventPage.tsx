@@ -7,8 +7,9 @@ import { formatCpf } from '../../lib/formatters'
 import PhoneNumberField from '../../components/PhoneNumberField'
 import ThemeToggle from '../../components/ThemeToggle'
 import { appAsset, appUrl } from '../../lib/paths'
+import GoogleSignInButton from '../../components/GoogleSignInButton'
 
-type Props = { slug: string; user: User | null; profile: Profile | null; theme: string; onToggleTheme: () => void; onLogout: () => void }
+type Props = { slug: string; user: User | null; profile: Profile | null; theme: string; onToggleTheme: () => void; onOpenProfile: () => void; onLogout: () => void }
 type QueueState = { atendendo: number | null; proxima: number | null }
 type CustomerQueueRow = QueueRow & { evento_id?: string }
 const passwordRules = [
@@ -25,7 +26,7 @@ function messageFromError(error: unknown, fallback: string) {
   return fallback
 }
 
-export default function PublicEventPage({ slug, user, profile, theme, onToggleTheme, onLogout }: Props) {
+export default function PublicEventPage({ slug, user, profile, theme, onToggleTheme, onOpenProfile, onLogout }: Props) {
   const [event, setEvent] = useState<EventRow | null>(null)
   const [eventLoading, setEventLoading] = useState(true)
   const [pageError, setPageError] = useState('')
@@ -67,10 +68,11 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
       if (!supabase) { setEventLoading(false); return }
       setEventLoading(true)
       setPageError('')
-      const { data, error: loadError } = await supabase.from('events').select('*').eq('slug', slug).eq('status', 'ativo').maybeSingle()
+      const { data, error: loadError } = await supabase.rpc('get_public_event_by_slug', { p_slug: slug })
       if (!active) return
       if (loadError) setPageError(messageFromError(loadError, 'Não foi possível carregar este evento.'))
-      setEvent((data as EventRow | null) ?? null)
+      const eventRow = Array.isArray(data) ? data[0] : data
+      setEvent((eventRow as EventRow | null) ?? null)
       setEventLoading(false)
     }
     void loadEvent()
@@ -98,21 +100,21 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
   const loadQueue = useCallback(async (showLoader = false) => {
     if (!supabase || !event || !user) return
     if (showLoader) setQueueLoading(true)
-    const [entriesResult, stateResult] = await Promise.all([
-      supabase.rpc('listar_fila_evento', { p_evento_id: event.id }),
-      supabase.rpc('estado_fila_evento', { p_evento_id: event.id }),
-    ])
+    const entriesResult = await supabase.rpc('listar_fila_evento', { p_evento_id: event.id })
     if (entriesResult.error) setPageError(messageFromError(entriesResult.error, 'Não foi possível carregar sua posição na fila.'))
     else {
       const entries = (entriesResult.data ?? []) as CustomerQueueRow[]
       const activeEntries = entries.filter((entry) => entry.status === 'na fila' || entry.status === 'em atendimento')
       activeEntries.sort((a, b) => b.ordem_fila - a.ordem_fila)
       setMyEntry(activeEntries[0] ?? null)
-    }
-    if (stateResult.error) setPageError(messageFromError(stateResult.error, 'Não foi possível consultar o andamento da fila.'))
-    else {
-      const state = Array.isArray(stateResult.data) ? stateResult.data[0] : stateResult.data
-      setQueueState({ atendendo: state?.atendendo ?? null, proxima: state?.proxima ?? null })
+      if (activeEntries.length) {
+        const { data, error: stateError } = await supabase.rpc('estado_fila_evento', { p_evento_id: event.id })
+        if (stateError) setPageError(messageFromError(stateError, 'Não foi possível consultar o andamento da fila.'))
+        else {
+          const state = Array.isArray(data) ? data[0] : data
+          setQueueState({ atendendo: state?.atendendo ?? null, proxima: state?.proxima ?? null })
+        }
+      } else setQueueState({ atendendo: null, proxima: null })
     }
     if (showLoader) setQueueLoading(false)
   }, [event, user])
@@ -135,6 +137,21 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
   }, [myEntry, event?.nome])
 
   const eventRedirect = () => `${window.location.origin}${appUrl(`/events/${encodeURIComponent(slug)}`)}`
+
+  async function signInWithGoogle() {
+    if (!supabase) return
+    setAuthBusy(true); setPageError(''); setEmailSent(false)
+    try {
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: eventRedirect() },
+      })
+      if (authError) throw authError
+    } catch (caught) {
+      setPageError(messageFromError(caught, 'Não foi possível iniciar o acesso com Google.'))
+      setAuthBusy(false)
+    }
+  }
 
   async function sendLoginLink(eventSubmit: FormEvent) {
     eventSubmit.preventDefault()
@@ -217,7 +234,7 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
   const isMyTurn = myEntry?.status === 'em atendimento'
 
   return <main className="public-event-page">
-    <header className="public-event-top"><a className="brand" href={appUrl('/')}>🎃 fila<span>do</span>halloween</a><div>{user && <button className="secondary" onClick={onLogout}>Sair</button>}<ThemeToggle theme={theme} onToggle={onToggleTheme} /></div></header>
+    <header className="public-event-top"><a className="brand" href={appUrl('/')}>🎃 fila<span>do</span>halloween</a><div>{user && <><button className="secondary public-profile-button" onClick={onOpenProfile}>Meu perfil</button><button className="secondary public-logout-button" onClick={onLogout}>Sair</button></>}<ThemeToggle theme={theme} onToggle={onToggleTheme} /></div></header>
     {eventLoading ? <section className="public-event-loading"><span className="loading-skeleton skeleton-cover"/><span className="loading-skeleton skeleton-line wide"/><span className="loading-skeleton skeleton-line"/></section> : !event ? <section className="public-event-missing"><span>🕸️</span><h1>Evento não encontrado</h1><p>Este evento pode ter sido encerrado ou o endereço está incorreto.</p></section> : <>
       <section className="public-event-hero" style={{ backgroundImage: `linear-gradient(90deg, #100d18e8 0%, #100d18a8 52%, #100d1830 100%), url("${event.banner || event.imagem_capa || ''}")` }}>
         <div className="public-event-hero-content">
@@ -265,6 +282,7 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
             <button className="primary" data-signup-field="submit" disabled={authBusy}>{authBusy ? 'Criando cadastro...' : 'Cadastrar e continuar'}<span>→</span></button>
             <button type="button" className="text-button public-mode-toggle" onClick={() => { setMode('login'); setPageError(''); setEmailSent(false) }}>Já tenho cadastro · Entrar</button>
           </form>}
+          <div className="public-auth-social"><span>ou continue com</span><GoogleSignInButton onClick={() => void signInWithGoogle()} disabled={authBusy} /><small>Se ainda não houver cadastro, criaremos um perfil com seu nome e e-mail. Telefone e CPF são opcionais.</small></div>
         </section>}
         <footer className="public-event-footer">Acompanhe sua vez por esta página · Fila Digital Halloween</footer>
       </section>

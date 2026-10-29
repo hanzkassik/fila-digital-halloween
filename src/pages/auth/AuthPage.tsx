@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase'
 import { formatCpf } from '../../lib/formatters'
 import PhoneNumberField from '../../components/PhoneNumberField'
 import { appUrl } from '../../lib/paths'
+import GoogleSignInButton from '../../components/GoogleSignInButton'
 
 type Step = 'login' | 'signup' | 'recover' | 'verify'
 type Purpose = 'login' | 'signup' | 'recover'
@@ -55,6 +56,27 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
 
   function showVerification(action: Purpose, text: string) {
     setPurpose(action); setStep('verify'); setToken(''); setMessage(text); setError('')
+  }
+
+  async function signInWithGoogle() {
+    if (!supabase) return
+    setBusy(true); setError(''); setMessage('')
+    try {
+      const next = new URLSearchParams(window.location.search).get('next')
+      const allowedNext = next && next.startsWith('/') && !next.startsWith('//')
+        && (/^\/events$/.test(next) || /^\/events\/[0-9a-f-]{36}$/i.test(next) || /^\/users$/.test(next) || /^\/users\/[0-9a-f-]{36}$/i.test(next) || next === '/profile')
+        ? next
+        : null
+      const redirectPath = `${appUrl('/auth')}${allowedNext ? `?next=${encodeURIComponent(allowedNext)}` : ''}`
+      const { error: authError } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: `${window.location.origin}${redirectPath}` },
+      })
+      if (authError) throw authError
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : 'Não foi possível iniciar o acesso com Google.')
+      setBusy(false)
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -150,6 +172,7 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
         {message && <div className="notice">{message}</div>}{error && <div className="error">{error}</div>}
         <button className="primary" disabled={busy}>{busy ? 'Só um instante...' : step === 'login' ? (passwordMode ? 'Entrar na conta' : 'Enviar código por e-mail') : step === 'signup' ? 'Criar conta e enviar código' : step === 'recover' ? 'Enviar código de recuperação' : purpose === 'recover' ? 'Redefinir senha' : 'Confirmar código'}<span>→</span></button>
       </form>
+      {step === 'login' && <div className="auth-social"><span>ou entre com</span><GoogleSignInButton onClick={() => void signInWithGoogle()} disabled={busy} /><small>Na primeira entrada, criaremos seu perfil como usuário padrão, sujeito à aprovação do administrador.</small></div>}
       {step === 'login' && <div className="auth-links"><button onClick={() => setPasswordMode(!passwordMode)}>{passwordMode ? 'Entrar com código por e-mail' : 'Entrar com senha'}</button><button onClick={() => { setStep('recover'); setError(''); setMessage('') }}>Esqueci minha senha</button></div>}
       {step === 'verify' && <div className="auth-links"><button disabled={busy} onClick={() => void resendCode()}>Reenviar código</button><button onClick={() => setStep(purpose === 'signup' ? 'signup' : 'login')}>Voltar</button></div>}
       {step === 'recover' && <div className="auth-links"><button onClick={() => setStep('login')}>Voltar para entrar</button></div>}

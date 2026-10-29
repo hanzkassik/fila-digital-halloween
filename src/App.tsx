@@ -6,6 +6,7 @@ import ThemeToggle from './components/ThemeToggle'
 import AuthPage from './pages/auth/AuthPage'
 import ApprovalPage from './pages/approval/ApprovalPage'
 import AdminDashboardPage from './pages/admin/AdminDashboardPage'
+import ProfilePage from './pages/profile/ProfilePage'
 import PublicEventPage from './pages/public/PublicEventPage'
 import { appPathname, appUrl } from './lib/paths'
 
@@ -14,6 +15,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('fila-theme') === 'light' ? 'light' : 'dark')
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [profileReturnPath, setProfileReturnPath] = useState('/approval')
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [error, setError] = useState('')
 
@@ -85,6 +87,11 @@ export default function App() {
       return
     }
 
+    if (user && !isActiveAdmin && pathname === '/auth') {
+      const requestedPath = new URLSearchParams(window.location.search).get('next')
+      if (requestedPath === '/profile') navigate('/profile', true)
+    }
+
     if (isActiveAdmin && pathname === '/auth') {
       const requestedPath = new URLSearchParams(window.location.search).get('next')
       const safePath = requestedPath && requestedPath.startsWith('/') && !requestedPath.startsWith('//')
@@ -97,10 +104,17 @@ export default function App() {
 
   if (!supabase) return <main className="setup"><header className="brand">🎃 fila<span>do</span>halloween</header><section className="setup-card"><small>QUASE PRONTO</small><h1>Conecte seu Supabase</h1><p>Configure as variáveis para ativar o acesso e o painel.</p><code>VITE_SUPABASE_URL<br />VITE_SUPABASE_ANON_KEY</code>{themeToggle}</section></main>
   if (loading) return <main className="loading"><span>🎃</span><p>Preparando a fila...</p></main>
-  if (publicEventSlug && !isUuid) return <PublicEventPage slug={publicEventSlug} user={user} profile={profile} theme={theme} onToggleTheme={toggleTheme} onLogout={() => void logout()} />
+  if (publicEventSlug && !isUuid) return <PublicEventPage slug={publicEventSlug} user={user} profile={profile} theme={theme} onToggleTheme={toggleTheme} onOpenProfile={() => { setProfileReturnPath(pathname); navigate('/profile') }} onLogout={() => void logout()} />
   if (!user) return <AuthPage theme={theme} onToggleTheme={toggleTheme} />
   if (!isActiveAdmin) {
-    return <ApprovalPage user={user} profile={profile?.id === user.id ? profile : null} error={error} themeToggle={themeToggle} onReload={() => void loadProfile(user)} onLogout={() => void logout()} />
+    if (pathname === '/profile' && profile?.id === user.id && profile.status === 'ativo') {
+      return <main className="account-shell">
+        <header className="account-top"><a className="brand" href="#">🎃 fila<span>do</span>halloween</a>{themeToggle}</header>
+        <ProfilePage profile={profile} onProfileUpdated={setProfile} onLogout={() => void logout()} />
+        <button className="secondary account-back" onClick={() => navigate(profileReturnPath)}>Voltar</button>
+      </main>
+    }
+    return <ApprovalPage user={user} profile={profile?.id === user.id ? profile : null} error={error} themeToggle={themeToggle} onReload={() => void loadProfile(user)} onOpenProfile={() => navigate('/profile')} onLogout={() => void logout()} />
   }
   if (pathname === '/auth') return <main className="loading"><span>🎃</span><p>Voltando para a página solicitada...</p></main>
   return <AdminDashboardPage profile={profile!} themeToggle={themeToggle} pathname={pathname} navigate={navigate} onLogout={() => void logout()} onProfileUpdated={setProfile} />

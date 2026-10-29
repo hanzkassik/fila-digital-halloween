@@ -6,6 +6,12 @@ No diretório do projeto, rode `supabase db push` depois de vincular a CLI ao pr
 
 O painel usa as variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (ou a chave publicável equivalente). Copie `.env.example` para `.env.local` e preencha esses valores. Nunca coloque a `service_role` no navegador.
 
+## Segurança e publicação
+
+A migration `20261029150000_harden_rls_and_public_access.sql` endurece as permissões: somente administradores ativos podem alterar eventos e filas; usuários autenticados podem atualizar nome, telefone, CPF e nascimento do próprio perfil, além de inativar a própria conta, e entrar na fila por RPC; leituras de fila usam funções com escopo; visitantes anônimos carregam um único evento ativo pelo slug. A inativação é permitida uma única vez e o usuário não pode reativar a própria conta. Aplique as migrations pendentes antes de publicar o frontend que usa esses RPCs.
+
+As Edge Functions administrativas devem continuar com `verify_jwt = true`. Implante ambas após qualquer alteração nelas com `supabase functions deploy admin-create-user` e `supabase functions deploy admin-update-user`. A chave `service_role` deve existir somente nos secrets do Supabase, nunca no frontend.
+
 O botão administrativo **Criar usuário** envia um convite pela Edge Function `admin-create-user`. A função valida o JWT e confirma no banco que o chamador ainda tem papel `admin` e status `ativo`; a chave `service_role` fica somente no ambiente seguro da função. Implante com `supabase functions deploy admin-create-user` e configure `APP_URL` como secret da função para o endereço final do app (por exemplo, `supabase secrets set APP_URL=https://seu-dominio.com`). Configure a URL do site em **Authentication → URL Configuration** e um SMTP para entrega dos convites.
 
 A tela **Usuários** consulta os perfis e o histórico de fila de cada cadastro. Alterações administrativas usam a Edge Function `admin-update-user`, que valida o JWT e o papel/status do administrador antes de editar perfil, papel, status e e-mail do usuário. Implante com `supabase functions deploy admin-update-user`.
@@ -38,7 +44,8 @@ Não inclua papel de administrador nos metadados públicos de cadastro. A funç�
 - Eventos: consultar `events`; usuários autenticados recebem somente ativos.
 - Entrar na fila: `supabase.rpc('join_event_queue', { p_evento_id: eventoId })`. A posição é atribuída no banco em uma transação serializada por evento.
 - Consultar fila: `supabase.rpc('listar_fila_evento', { p_evento_id: eventoId })`. Para administradores, `p_evento_id: null` lista todas as filas.
-- Próxima posição a atender: `supabase.rpc('proxima_ordem_fila', { p_evento_id: eventoId })`. Retorna primeiro a posição marcada `em atendimento`; se não houver, a primeira posição paga com status `na fila`. Retorna `null` quando não há posição elegível.
+- Excluir inscrições como administrador: `supabase.rpc('admin_delete_queue_entries', { p_evento_id: eventoId, p_queue_ids: [queueId1, queueId2] })`. A migration `20261029160000_admin_delete_queue_entries.sql` restringe a operação a administradores ativos e processa os itens do maior número para o menor. Aplique a migration antes de usar a exclusão.
+- Estado público da fila para participante: `supabase.rpc('estado_fila_evento', { p_evento_id: eventoId })`. A função só retorna números para administradores ativos e participantes ativos daquele evento. A função antiga `proxima_ordem_fila` não é mais executável pelas roles da API.
 - Chamar próximo no painel: `supabase.rpc('chamar_proximo_da_fila', { p_evento_id: eventoId })`. A função valida que o chamador é administrador ativo e avança atomicamente para a próxima posição em ordem, independentemente do pagamento. Se a fila estiver vazia, mantém o atendimento atual. Aplique `20261029090000_call_next_unpaid_queue_entries.sql`.
 - Criar um usuário pelo painel: `supabase.functions.invoke('admin-create-user', { body: { nome, cpf, email, telefone, data_nascimento } })`. O gatilho de criação de perfil salva a data de nascimento dos metadados de convite. A migração `20261029040000_sync_profile_email.sql` sincroniza no perfil as alterações de e-mail confirmadas pelo Supabase Auth.
 

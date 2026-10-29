@@ -78,9 +78,7 @@ export default function UsersPage({ userId, onUserSelect, onBack }: Props) {
     if (!supabase) return
     setSelected(user); setDraft({ ...user }); setPhone(user.telefone ?? undefined)
     setEditing(false); setError(''); setNotice(''); setHistory([]); setHistoryError(''); setHistoryLoading(true)
-    const { data: entries, error: historyError } = await supabase.from('event_queue')
-      .select('id,usuario_id,evento_id,ordem_fila,pago,forma_pagamento,valor_pagamento,status,criado_em')
-      .eq('usuario_id', user.id).order('criado_em', { ascending: false })
+    const { data: entries, error: historyError } = await supabase.rpc('admin_list_user_queue', { p_usuario_id: user.id })
     if (historyError) { setError(historyError.message); setHistoryError(historyError.message); setHistoryLoading(false); return }
     const rows = (entries ?? []) as (QueueRow & { evento_id: string })[]
     const eventIds = [...new Set(rows.map((row) => row.evento_id))]
@@ -109,21 +107,22 @@ export default function UsersPage({ userId, onUserSelect, onBack }: Props) {
   async function saveUser(event: FormEvent) {
     event.preventDefault()
     if (!supabase || !selected || !draft) return
-    if (draft.cpf?.replace(/\D/g, '').length !== 11) { setError('Informe um CPF com 11 dígitos.'); return }
+    const cpfDigits = draft.cpf?.replace(/\D/g, '') ?? ''
+    if (cpfDigits && cpfDigits.length !== 11) { setError('Se informado, o CPF precisa ter 11 dígitos.'); return }
     if (!phone || !isValidPhoneNumber(phone)) { setError('Informe um telefone válido para o país escolhido.'); return }
     setSaving(true); setError(''); setNotice('')
     try {
       const { error: updateError } = await supabase.functions.invoke('admin-update-user', {
         body: {
           user_id: selected.id,
-          nome: draft.nome.trim(), cpf: draft.cpf.replace(/\D/g, ''), email: draft.email.trim().toLowerCase(),
+          nome: draft.nome.trim(), cpf: cpfDigits || null, email: draft.email.trim().toLowerCase(),
           telefone: phone, data_nascimento: draft.data_nascimento || null, papel: draft.papel, status: draft.status,
         },
       })
       if (updateError) {
         throw new Error(await getEdgeFunctionError(updateError))
       }
-      const updated: Profile = { ...draft, cpf: draft.cpf.replace(/\D/g, ''), telefone: phone }
+      const updated: Profile = { ...draft, cpf: cpfDigits || null, telefone: phone }
       setSelected(updated); setDraft(updated); setUsers((all) => all.map((user) => user.id === updated.id ? updated : user))
       setEditing(false); setNotice('Cadastro atualizado com sucesso.')
     } catch (caught) { setError(messageOf(caught)) }
@@ -150,7 +149,7 @@ export default function UsersPage({ userId, onUserSelect, onBack }: Props) {
       <article className="user-panel"><div className="user-panel-title"><h3>Dados cadastrais</h3>{editing && <span>Alterações só afetam este cadastro.</span>}</div>
         {editing ? <form className="user-edit-form" onSubmit={saveUser}>
           <label>Nome<input required maxLength={120} value={draft.nome} onChange={(e) => setDraft({ ...draft, nome: e.target.value })} /></label>
-          <label>CPF<input required inputMode="numeric" maxLength={14} value={formatCpf(draft.cpf ?? '')} onChange={(e) => setDraft({ ...draft, cpf: formatCpf(e.target.value) })} /></label>
+          <label>CPF (opcional)<input inputMode="numeric" maxLength={14} value={formatCpf(draft.cpf ?? '')} onChange={(e) => setDraft({ ...draft, cpf: formatCpf(e.target.value) })} /></label>
           <label>E-mail<input required type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} /></label>
           <label>Telefone<PhoneNumberField value={phone} onChange={setPhone} /></label>
           <label>Data de nascimento<input type="date" value={draft.data_nascimento ?? ''} onChange={(e) => setDraft({ ...draft, data_nascimento: e.target.value || null })} /></label>
