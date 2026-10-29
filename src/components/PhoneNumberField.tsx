@@ -1,6 +1,7 @@
 import PhoneInput, { getCountries, getCountryCallingCode, type Country } from 'react-phone-number-input'
 import { useEffect, useMemo, useRef, useState, type FocusEvent } from 'react'
 import countryNames from 'react-phone-number-input/locale/pt-BR.json'
+import { appAsset } from '../lib/paths'
 
 type Option = { value?: string; label: string }
 type CountrySelectProps = {
@@ -71,7 +72,7 @@ function CountrySelect({ value, onChange, options, disabled, readOnly, tabIndex,
       onBlur={(event) => onBlur?.(event)}
       onClick={() => { setSearch(''); setOpen((current) => !current) }}
     >
-      {selected && <img className="country-flag" src={'/flags/' + selected.code + '.svg'} alt="" />}
+      {selected && <img className="country-flag" src={appAsset('flags/' + selected.code + '.svg')} alt="" />}
       <span className="phone-country-label">{selected ? selected.name + ' (+' + selected.callingCode + ')' : 'Escolha o país'}</span>
       <span className="phone-country-chevron" aria-hidden="true" />
     </button>
@@ -95,7 +96,7 @@ function CountrySelect({ value, onChange, options, disabled, readOnly, tabIndex,
             className={'country-option ' + (country.code === value ? 'selected' : '')}
             onClick={() => { onChange(country.code); setOpen(false); trigger.current?.focus() }}
           >
-            <img className="country-flag" src={'/flags/' + country.code + '.svg'} alt="" />
+            <img className="country-flag" src={appAsset('flags/' + country.code + '.svg')} alt="" />
             <span>{country.name}</span>
             <small>+{country.callingCode}</small>
           </button>

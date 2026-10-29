@@ -6,6 +6,7 @@ import AdminCreateUserModal from './components/AdminCreateUserModal'
 import AddToQueueModal from './components/AddToQueueModal'
 import UsersPage from './UsersPage'
 import { formatBirthDate, getAge } from '../../lib/formatters'
+import { appAsset } from '../../lib/paths'
 
 type Props = { profile: Profile; themeToggle: ReactNode; pathname: string; navigate: (to: string, replace?: boolean) => void; onLogout: () => void; onProfileUpdated: (profile: Profile) => void }
 const statuses: Record<string, string> = { 'na fila': 'Na fila', 'em atendimento': 'Em atendimento', atendido: 'Atendido', cancelado: 'Cancelado', inativo: 'Inativo' }
@@ -90,8 +91,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   useEffect(() => {
     const faviconLink = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
     if (!faviconLink) return
-    faviconLink.href = selectedEvent?.favicon || '/favicon.svg?v=3'
-    return () => { faviconLink.href = '/favicon.svg?v=3' }
+    faviconLink.href = selectedEvent?.favicon || `${appAsset('favicon.svg')}?v=3`
+    return () => { faviconLink.href = `${appAsset('favicon.svg')}?v=3` }
   }, [selectedEvent?.favicon])
 
   useEffect(() => {

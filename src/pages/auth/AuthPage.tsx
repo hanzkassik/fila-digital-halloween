@@ -4,6 +4,7 @@ import 'react-phone-number-input/style.css'
 import { supabase } from '../../lib/supabase'
 import { formatCpf } from '../../lib/formatters'
 import PhoneNumberField from '../../components/PhoneNumberField'
+import { appUrl } from '../../lib/paths'
 
 type Step = 'login' | 'signup' | 'recover' | 'verify'
 type Purpose = 'login' | 'signup' | 'recover'
@@ -65,7 +66,11 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
         const { error: authError } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
         if (authError) throw authError
       } else if (step === 'login') {
-        const { error: authError } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } })
+        const next = new URLSearchParams(window.location.search).get('next')
+        const redirectPath = next && next.startsWith('/') && !next.startsWith('//')
+          ? `${appUrl('/auth')}?next=${encodeURIComponent(next)}`
+          : appUrl('/auth')
+        const { error: authError } = await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false, emailRedirectTo: `${window.location.origin}${redirectPath}` } })
         if (authError) throw authError
         showVerification('login', 'Enviamos um código de acesso para seu e-mail.')
       } else if (step === 'signup') {

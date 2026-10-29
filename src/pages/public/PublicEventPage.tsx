@@ -6,6 +6,7 @@ import type { EventRow, Profile, QueueRow } from '../../types'
 import { formatCpf } from '../../lib/formatters'
 import PhoneNumberField from '../../components/PhoneNumberField'
 import ThemeToggle from '../../components/ThemeToggle'
+import { appAsset, appUrl } from '../../lib/paths'
 
 type Props = { slug: string; user: User | null; profile: Profile | null; theme: string; onToggleTheme: () => void; onLogout: () => void }
 type QueueState = { atendendo: number | null; proxima: number | null }
@@ -79,8 +80,8 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
   useEffect(() => {
     const faviconLink = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
     if (!faviconLink) return
-    faviconLink.href = event?.favicon || '/favicon.svg?v=3'
-    return () => { faviconLink.href = '/favicon.svg?v=3' }
+    faviconLink.href = event?.favicon || `${appAsset('favicon.svg')}?v=3`
+    return () => { faviconLink.href = `${appAsset('favicon.svg')}?v=3` }
   }, [event?.favicon])
 
   useEffect(() => {
@@ -133,7 +134,7 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
     }
   }, [myEntry, event?.nome])
 
-  const eventRedirect = () => `${window.location.origin}/events/${encodeURIComponent(slug)}`
+  const eventRedirect = () => `${window.location.origin}${appUrl(`/events/${encodeURIComponent(slug)}`)}`
 
   async function sendLoginLink(eventSubmit: FormEvent) {
     eventSubmit.preventDefault()
@@ -216,7 +217,7 @@ export default function PublicEventPage({ slug, user, profile, theme, onToggleTh
   const isMyTurn = myEntry?.status === 'em atendimento'
 
   return <main className="public-event-page">
-    <header className="public-event-top"><a className="brand" href="/events">🎃 fila<span>do</span>halloween</a><div>{user && <button className="secondary" onClick={onLogout}>Sair</button>}<ThemeToggle theme={theme} onToggle={onToggleTheme} /></div></header>
+    <header className="public-event-top"><a className="brand" href={appUrl('/')}>🎃 fila<span>do</span>halloween</a><div>{user && <button className="secondary" onClick={onLogout}>Sair</button>}<ThemeToggle theme={theme} onToggle={onToggleTheme} /></div></header>
     {eventLoading ? <section className="public-event-loading"><span className="loading-skeleton skeleton-cover"/><span className="loading-skeleton skeleton-line wide"/><span className="loading-skeleton skeleton-line"/></section> : !event ? <section className="public-event-missing"><span>🕸️</span><h1>Evento não encontrado</h1><p>Este evento pode ter sido encerrado ou o endereço está incorreto.</p></section> : <>
       <section className="public-event-hero" style={{ backgroundImage: `linear-gradient(90deg, #100d18e8 0%, #100d18a8 52%, #100d1830 100%), url("${event.banner || event.imagem_capa || ''}")` }}>
         <div className="public-event-hero-content">

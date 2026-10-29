@@ -30,7 +30,7 @@
 :root[data-theme="light"] { color-scheme:light; --bg:#fff9f0; --surface:#fffdf9; --surface2:#f7eee3; --input:#fffaf4; --text:#2b1d34; --muted:#806e83; --line:#eadccf; --purple:#8448c8; --orange:#d9672c; --green:#258554; --red:#cc454e; --shadow:0 24px 70px #502d1917; background:var(--bg); color:var(--text); }
 * { box-sizing:border-box; }
 body { margin:0; min-width:320px; min-height:100vh; background:var(--bg); color:var(--text); }
-body::after { content:""; position:fixed; z-index:100; right:14px; bottom:10px; width:104px; height:110px; background:url('/ghost-mascot.svg?v=2') center / contain no-repeat; pointer-events:none; opacity:.94; filter:drop-shadow(0 5px 12px #9c65d855); animation:ghost-float 3.2s ease-in-out infinite; }
+body::after { content:""; position:fixed; z-index:100; right:14px; bottom:10px; width:104px; height:110px; background:var(--ghost-mascot-url) center / contain no-repeat; pointer-events:none; opacity:.94; filter:drop-shadow(0 5px 12px #9c65d855); animation:ghost-float 3.2s ease-in-out infinite; }
 @keyframes ghost-float { 0%,100% { transform:translateY(0); } 50% { transform:translateY(-4px); } }
 @media (max-width:600px) { body::after { right:4px; bottom:4px; width:72px; height:78px; opacity:.82; } }
 @media (prefers-reduced-motion:reduce) { body::after { animation:none; } }
