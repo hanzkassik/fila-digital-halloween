@@ -1,122 +1,81 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import { useCallback, useEffect, useState } from 'react'
+import type { User } from '@supabase/supabase-js'
+import { supabase, isSupabaseConfigured } from './lib/supabase'
+import type { Profile } from './types'
+import ThemeToggle from './components/ThemeToggle'
+import AuthPage from './pages/auth/AuthPage'
+import ApprovalPage from './pages/approval/ApprovalPage'
+import AdminDashboardPage from './pages/admin/AdminDashboardPage'
+import PublicEventPage from './pages/public/PublicEventPage'
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [pathname, setPathname] = useState(() => window.location.pathname)
+  const [theme, setTheme] = useState(() => localStorage.getItem('fila-theme') === 'light' ? 'light' : 'dark')
+  const [user, setUser] = useState<User | null>(null)
+  const [profile, setProfile] = useState<Profile | null>(null)
+  const [loading, setLoading] = useState(isSupabaseConfigured)
+  const [error, setError] = useState('')
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('fila-theme', theme)
+  }, [theme])
 
-      <div className="ticks"></div>
+  useEffect(() => {
+    const handlePopState = () => setPathname(window.location.pathname)
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+  const navigate = useCallback((to: string, replace = false) => {
+    if (replace) window.history.replaceState(null, '', to)
+    else if (window.location.pathname !== to) window.history.pushState(null, '', to)
+    setPathname(to)
+    window.scrollTo({ top: 0, behavior: 'instant' })
+  }, [])
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+  const loadProfile = useCallback(async (authUser: User | null) => {
+    if (!supabase || !authUser) { setProfile(null); return }
+    const { data, error: profileError } = await supabase.from('profiles')
+      .select('id,nome,email,papel,status,telefone,cpf,data_nascimento').eq('id', authUser.id).maybeSingle()
+    if (profileError) setError(profileError.message)
+    setProfile(data as Profile | null)
+  }, [])
+
+  useEffect(() => {
+    if (!supabase) return
+    let active = true
+    supabase.auth.getSession().then(async ({ data }) => {
+      if (!active) return
+      const currentUser = data.session?.user ?? null
+      setUser(currentUser)
+      await loadProfile(currentUser)
+      setLoading(false)
+    })
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      const currentUser = session?.user ?? null
+      setUser(currentUser)
+      if (currentUser) window.setTimeout(() => void loadProfile(currentUser), 0)
+      else setProfile(null)
+    })
+    return () => { active = false; listener.subscription.unsubscribe() }
+  }, [loadProfile])
+
+  const toggleTheme = () => setTheme((current) => current === 'dark' ? 'light' : 'dark')
+  const logout = useCallback(async () => { if (supabase) await supabase.auth.signOut() }, [])
+  const themeToggle = <ThemeToggle theme={theme} onToggle={toggleTheme} />
+  const publicEventMatch = /^\/events\/([^/]+)$/.exec(pathname.replace(/\/+$/, ''))
+  const publicEventSlug = publicEventMatch ? decodeURIComponent(publicEventMatch[1]) : null
+  const isUuid = publicEventSlug ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicEventSlug) : false
+  const isAdminQueueRoute = Boolean(isUuid && profile?.papel === 'admin' && profile.status === 'ativo')
+
+  if (!supabase) return <main className="setup"><header className="brand">🎃 fila<span>do</span>halloween</header><section className="setup-card"><small>QUASE PRONTO</small><h1>Conecte seu Supabase</h1><p>Configure as variáveis para ativar o acesso e o painel.</p><code>VITE_SUPABASE_URL<br />VITE_SUPABASE_ANON_KEY</code>{themeToggle}</section></main>
+  if (loading) return <main className="loading"><span>🎃</span><p>Preparando a fila...</p></main>
+  if (publicEventSlug && !isAdminQueueRoute) return <PublicEventPage slug={publicEventSlug} user={user} profile={profile} theme={theme} onToggleTheme={toggleTheme} onLogout={() => void logout()} />
+  if (!user) return <AuthPage theme={theme} onToggleTheme={toggleTheme} />
+  if (!profile || profile.papel !== 'admin' || profile.status !== 'ativo') {
+    return <ApprovalPage user={user} profile={profile} error={error} themeToggle={themeToggle} onReload={() => void loadProfile(user)} onLogout={() => void logout()} />
+  }
+  return <AdminDashboardPage profile={profile} themeToggle={themeToggle} pathname={pathname} navigate={navigate} onLogout={() => void logout()} onProfileUpdated={setProfile} />
 }
 
-export default App

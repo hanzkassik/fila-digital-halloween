@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 190 200" fill="none">
+  <defs>
+    <linearGradient id="sheet" x1="57" y1="58" x2="128" y2="166" gradientUnits="userSpaceOnUse"><stop stop-color="#fff"/><stop offset=".52" stop-color="#f2f0ff"/><stop offset="1" stop-color="#9be6ee"/></linearGradient>
+    <linearGradient id="hat" x1="75" y1="26" x2="132" y2="66" gradientUnits="userSpaceOnUse"><stop stop-color="#57317f"/><stop offset="1" stop-color="#a45bdd"/></linearGradient>
+    <linearGradient id="glass" x1="144" y1="117" x2="165" y2="153" gradientUnits="userSpaceOnUse"><stop stop-color="#faffc2"/><stop offset="1" stop-color="#55d9df"/></linearGradient>
+    <radialGradient id="aura"><stop stop-color="#bd82ff" stop-opacity=".5"/><stop offset="1" stop-color="#bd82ff" stop-opacity="0"/></radialGradient>
+    <filter id="soft" x="8" y="9" width="177" height="184" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="8"/></filter>
+    <filter id="ground" x="36" y="174" width="113" height="20" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="5"/></filter>
+  </defs>
+  <ellipse cx="94" cy="183" rx="47" ry="6" fill="#36214f" opacity=".2" filter="url(#ground)"/>
+  <ellipse cx="96" cy="104" rx="79" ry="77" fill="url(#aura)" filter="url(#soft)"/>
+  <!-- little witch hat -->
+  <path d="m75 54 21-38c2-4 8-3 9 2l8 35c17-3 31 0 40 6-24 8-68 11-96 2 4-4 10-6 18-7Z" fill="url(#hat)" stroke="#452766" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M76 55c20 7 52 4 73 0 5 1 10 3 14 6-23 9-70 13-102 2 3-4 8-6 15-8Z" fill="#342044" stroke="#c98aff" stroke-width="2" stroke-linejoin="round"/>
+  <path d="m104 23 5 22-13-2 8-20Z" fill="#ffbd69"/>
+  <path d="M95 70c-12-7-17-19-8-28 8-8 19-6 26 0 12-6 25 1 24 14 13 6 15 21 5 30 8 13 1 26-13 30-8 15-25 17-37 8-15 7-31-2-31-18-13-7-12-22 2-29 8-4 19-5 32-7Z" fill="#c888ff" opacity=".48"/>
+  <!-- floating ghost sheet -->
+  <path d="M55 103c0-22 15-37 36-37 22 0 37 16 37 38v29c7-1 12-8 18-7 8 1 8 11 1 17-12 11-24 4-32-1-9 13-21 14-31 7-10 9-24 7-30-1-11 6-24 2-27-7-3-8 2-15 10-15 6 0 12 5 18 6v-29Z" fill="url(#sheet)" stroke="#c7b0ec" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M61 137c8 5 15 5 22-1 8 7 16 7 23 0 7 6 14 6 21 1-2 12-8 19-17 21-8 2-15-1-20-6-8 6-17 7-24 2-5-3-7-9-5-17Z" fill="#b8edf2" opacity=".8"/>
+  <ellipse cx="82" cy="100" rx="5" ry="7" fill="#29223a"/><ellipse cx="105" cy="98" rx="5" ry="7" fill="#29223a"/>
+  <circle cx="84" cy="98" r="1.7" fill="white"/><circle cx="107" cy="96" r="1.7" fill="white"/>
+  <ellipse cx="72" cy="111" rx="5" ry="2.5" fill="#f4a9c8" opacity=".7"/><ellipse cx="114" cy="109" rx="5" ry="2.5" fill="#f4a9c8" opacity=".7"/>
+  <path d="M89 114c3 4 7 4 10 0" stroke="#705b8c" stroke-width="2.5" stroke-linecap="round"/>
+  <!-- vintage glowing hand lantern -->
+  <path d="m130 105 14 11" stroke="#9b7abb" stroke-width="4" stroke-linecap="round"/>
+  <path d="M143 119c-2-17 21-17 19 0" stroke="#563c70" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M142 120h22l-3 6h-16l-3-6Z" fill="#744994" stroke="#4b3262" stroke-width="2" stroke-linejoin="round"/>
+  <path d="m145 127-1 3v19l3 5h13l3-5v-19l-2-3h-16Z" fill="#37cbd5" stroke="#438f9d" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="m148 130-1 3v14l2 3h10l2-3v-14l-1-3h-12Z" fill="url(#glass)" stroke="#d2ffff" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M143 131h21m-20 16h19" stroke="#634578" stroke-width="2.5" stroke-linecap="round"/>
+  <path d="M147 127v26m13-26v26" stroke="#55aeb5" stroke-width="2"/>
+  <path d="m153 132-3 7h4l-2 6 6-9h-4l2-4h-3Z" fill="#fff6ae"/>
+  <path d="M150 158h7" stroke="#563c70" stroke-width="3" stroke-linecap="round"/>
+  <!-- halloween sparkles -->
+  <path d="m43 73 2 6 6 2-6 2-2 6-2-6-6-2 6-2 2-6Zm112-51 1.5 4.5L161 28l-4.5 1.5L155 34l-1.5-4.5L149 28l4.5-1.5L155 22Z" fill="#ffd278"/>
+  <path d="M39 112c-4 5-5 11-3 16m108-83 3 5m-99 84-4 3" stroke="#b879ef" stroke-width="2.5" stroke-linecap="round" opacity=".9"/>
+  <circle cx="137" cy="48" r="2" fill="#79e3e5"/><circle cx="52" cy="49" r="1.7" fill="#f6c465"/><circle cx="34" cy="96" r="1.5" fill="#8ce5e9"/>
+</svg>
