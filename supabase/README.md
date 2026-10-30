@@ -8,7 +8,11 @@ O painel usa as variáveis `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` (ou a 
 
 ## Segurança e publicação
 
-A migration `20261029150000_harden_rls_and_public_access.sql` endurece as permissões: somente administradores ativos podem alterar eventos e filas; usuários autenticados podem atualizar nome, telefone, CPF e nascimento do próprio perfil, além de inativar a própria conta, e entrar na fila por RPC; leituras de fila usam funções com escopo; visitantes anônimos carregam um único evento ativo pelo slug. A inativação é permitida uma única vez e o usuário não pode reativar a própria conta. Aplique as migrations pendentes antes de publicar o frontend que usa esses RPCs.
+A migration `20261029150000_harden_rls_and_public_access.sql` endurece as permissões: somente administradores ativos podem alterar eventos e filas; usuários autenticados podem atualizar nome, telefone, CPF e nascimento do próprio perfil e inativar a própria conta; visitantes anônimos carregam um único evento ativo pelo slug. A migration `20261029170000_public_name_phone_queue.sql` permite cadastro público na fila apenas por RPC com nome e telefone, sem exigir conta, e limita a consulta às inscrições que correspondem a esses dados. O acesso direto às tabelas continua bloqueado. Aplique as migrations pendentes antes de publicar o frontend que usa esses RPCs.
+
+## CAPTCHA na inscrição pública
+
+O formulário público usa Cloudflare Turnstile. Configure os domínios do widget no painel Cloudflare, incluindo `hanzkassik.github.io` e os endereços locais usados no desenvolvimento. Para desenvolvimento, adicione `VITE_TURNSTILE_SITE_KEY` ao `.env.local`; no GitHub, cadastre o mesmo valor como Actions secret `VITE_TURNSTILE_SITE_KEY`. A chave secreta nunca vai para o frontend: configure-a nos secrets do Supabase com `supabase secrets set TURNSTILE_SECRET_KEY=...`. Em seguida, aplique `20261029180000_protect_public_queue_with_captcha.sql` e implante `public-queue-signup` com `supabase functions deploy public-queue-signup`. Essa função valida o token no servidor; o RPC de inserção não pode ser chamado diretamente por `anon` ou `authenticated`.
 
 As Edge Functions administrativas devem continuar com `verify_jwt = true`. Implante ambas após qualquer alteração nelas com `supabase functions deploy admin-create-user` e `supabase functions deploy admin-update-user`. A chave `service_role` deve existir somente nos secrets do Supabase, nunca no frontend.
 
@@ -42,7 +46,7 @@ Não inclua papel de administrador nos metadados públicos de cadastro. A funç�
 
 - Perfis: consultar `profiles` pelo próprio `id`; a política RLS também restringe os resultados.
 - Eventos: consultar `events`; usuários autenticados recebem somente ativos.
-- Entrar na fila: `supabase.rpc('join_event_queue', { p_evento_id: eventoId })`. A posição é atribuída no banco em uma transação serializada por evento.
+- Cadastro público: consulte `find_public_event_queue_entries` com evento, nome e telefone; quando não houver entrada aguardando, chame `supabase.functions.invoke('public-queue-signup', { body: { evento_id, nome, telefone, captcha_token } })`. A Edge Function valida Turnstile e cria a inscrição com a próxima ordem. A consulta do estado usa `estado_publico_fila_evento` com os mesmos dados. As funções de consulta retornam apenas número, status e data da inscrição; a RPC de inserção não é executável por `anon` nem por `authenticated`.
 - Consultar fila: `supabase.rpc('listar_fila_evento', { p_evento_id: eventoId })`. Para administradores, `p_evento_id: null` lista todas as filas.
 - Excluir inscrições como administrador: `supabase.rpc('admin_delete_queue_entries', { p_evento_id: eventoId, p_queue_ids: [queueId1, queueId2] })`. A migration `20261029160000_admin_delete_queue_entries.sql` restringe a operação a administradores ativos e processa os itens do maior número para o menor. Aplique a migration antes de usar a exclusão.
 - Estado público da fila para participante: `supabase.rpc('estado_fila_evento', { p_evento_id: eventoId })`. A função só retorna números para administradores ativos e participantes ativos daquele evento. A função antiga `proxima_ordem_fila` não é mais executável pelas roles da API.

@@ -10,6 +10,8 @@ import { appAsset } from '../../lib/paths'
 
 type Props = { profile: Profile; themeToggle: ReactNode; pathname: string; navigate: (to: string, replace?: boolean) => void; onLogout: () => void; onProfileUpdated: (profile: Profile) => void }
 const statuses: Record<string, string> = { 'na fila': 'Na fila', 'em atendimento': 'Em atendimento', atendido: 'Atendido', cancelado: 'Cancelado', inativo: 'Inativo' }
+type QueueSort = 'order-asc' | 'order-desc' | 'status' | 'name'
+const queueStatusOrder: Record<string, number> = { 'em atendimento': 0, 'na fila': 1, atendido: 2, cancelado: 3, inativo: 4 }
 const methods: Record<string, string> = { pix: 'Pix', dinheiro: 'Dinheiro', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', transferencia: 'Transferência', outro: 'Outro' }
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
 const eventImagesBucket = 'fila-digital-halloween'
@@ -74,6 +76,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [events, setEvents] = useState<EventRow[]>([])
   const [eventsLoading, setEventsLoading] = useState(true)
   const [queue, setQueue] = useState<QueueRow[]>([])
+  const [queueSort, setQueueSort] = useState<QueueSort>('order-asc')
   const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([])
   const [queueLoading, setQueueLoading] = useState(false)
   const [selectedPerson, setSelectedPerson] = useState<QueueRow | null>(null)
@@ -133,13 +136,13 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     const { data, error: queryError } = await supabase.rpc('listar_fila_evento', { p_evento_id: event.id })
     if (queryError) { setError(queryError.message); setQueueLoading(false); return [] as QueueRow[] }
     const rows = (data ?? []) as QueueRow[]
-    const ids = [...new Set(rows.map((row) => row.usuario_id))]
+    const ids = [...new Set(rows.map((row) => row.usuario_id).filter((id): id is string => Boolean(id)))]
     const result = ids.length
       ? await supabase.from('profiles').select('id,nome,email,papel,status,telefone,cpf,data_nascimento').in('id', ids)
       : { data: [], error: null }
     if (result.error) setError(result.error.message)
     const people = (result.data ?? []) as Profile[]
-    const populated = rows.map((row) => ({ ...row, profile: people.find((person) => person.id === row.usuario_id) }))
+    const populated = rows.map((row) => ({ ...row, profile: row.usuario_id ? people.find((person) => person.id === row.usuario_id) : undefined }))
     setQueue(populated)
     const loadedIds = new Set(populated.map((row) => row.id))
     setSelectedQueueIds((current) => current.filter((id) => loadedIds.has(id)))
@@ -151,6 +154,12 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const visibleEvents = useMemo(() => events.filter((event) => showInactive || event.status === 'ativo'), [events, showInactive])
   const currentServing = queue.find((item) => item.status === 'em atendimento')
   const waitingCount = queue.filter((item) => item.status === 'na fila').length
+  const sortedQueue = useMemo(() => [...queue].sort((a, b) => {
+    if (queueSort === 'order-desc') return b.ordem_fila - a.ordem_fila
+    if (queueSort === 'status') return (queueStatusOrder[a.status] ?? 99) - (queueStatusOrder[b.status] ?? 99) || a.ordem_fila - b.ordem_fila
+    if (queueSort === 'name') return (a.profile?.nome ?? a.nome ?? '').localeCompare(b.profile?.nome ?? b.nome ?? '', 'pt-BR', { sensitivity: 'base' }) || a.ordem_fila - b.ordem_fila
+    return a.ordem_fila - b.ordem_fila
+  }), [queue, queueSort])
 
   async function saveEvent(event: FormEvent) {
     event.preventDefault()
@@ -259,10 +268,10 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
       if (called) {
         const row = refreshed.find((item) => item.id === called.id) ?? called
         if (row.profile) setCalledPerson(row)
-        else {
+        else if (called.usuario_id) {
           const { data: person } = await supabase.from('profiles').select('id,nome,email,papel,status,telefone,cpf,data_nascimento').eq('id', called.usuario_id).maybeSingle()
           setCalledPerson({ ...row, profile: (person as Profile | null) ?? undefined })
-        }
+        } else setCalledPerson(row)
         setMessage('Senha ' + String(called.ordem_fila).padStart(2, '0') + ' chamada.')
       } else {
         setMessage('Não há pessoas aguardando na fila.')
@@ -333,22 +342,22 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         )}</div> : eventsLoading ? <div className="event-grid event-grid-skeleton" aria-label="Carregando eventos">{Array.from({ length: 3 }, (_, index) => <div className="event-card-skeleton" key={index}><span className="loading-skeleton skeleton-cover"/><span className="loading-skeleton skeleton-line wide"/><span className="loading-skeleton skeleton-line"/><span className="loading-skeleton skeleton-line short"/></div>)}</div> : <div className="empty"><span>🕸️</span><h3>Nenhum evento por aqui</h3><p>Crie seu primeiro evento para organizar a fila.</p></div>}
       </> : <>
         <div className="queue-summary">
-          <div className="serving"><small className="eyebrow">AGORA EM ATENDIMENTO</small><strong>{queueLoading ? '…' : currentServing ? String(currentServing.ordem_fila).padStart(2, '0') : '—'}</strong><span>{queueLoading ? 'Carregando fila…' : currentServing?.profile?.nome ?? 'Nenhuma chamada'}</span><i>🎃</i></div>
+          <div className="serving"><small className="eyebrow">AGORA EM ATENDIMENTO</small><strong>{queueLoading ? '…' : currentServing ? String(currentServing.ordem_fila).padStart(2, '0') : '—'}</strong><span>{queueLoading ? 'Carregando fila…' : currentServing?.profile?.nome ?? currentServing?.nome ?? 'Nenhuma chamada'}</span><i>🎃</i></div>
           <div className="waiting-stat"><small>Aguardando</small><b>{queueLoading ? '…' : waitingCount}</b><span>pessoas</span></div>
           <button className="call-next" disabled={busy || queueLoading || selectedEvent.status !== 'ativo'} onClick={() => void callNext()}>📣 <b>{busy ? 'Chamando...' : 'Chamar próximo'}<small>Avançar em ordem da fila</small></b> →</button>
         </div>
-        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
+        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
         {!queueLoading && queue.length > 0 && <div className="queue-selection-toolbar">
           <label><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> Selecionar todos</label>
           <span>{selectedQueueIds.length} selecionado{selectedQueueIds.length === 1 ? '' : 's'}</span>
           {selectedQueueIds.length > 0 && <button className="danger-outline queue-delete-button" disabled={busy} onClick={() => void deleteSelectedQueueEntries()}>{busy ? 'Excluindo...' : `Excluir selecionados (${selectedQueueIds.length})`}</button>}
         </div>}
-        {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : queue.length ? <div className="queue-list">{queue.map((item) =>
+        {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : queue.length ? <div className="queue-list">{sortedQueue.map((item) =>
           <div key={item.id} className={'queue-row ' + (item.status === 'em atendimento' ? 'currently-serving' : '')}>
             <input className="queue-row-select" type="checkbox" checked={selectedQueueIds.includes(item.id)} onChange={(event) => setSelectedQueueIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} aria-label={`Selecionar senha ${item.ordem_fila}`} />
             <button className="queue-row-content" onClick={() => setSelectedPerson(item)}>
-              <b className="position">{String(item.ordem_fila).padStart(2, '0')}</b><span className="person-avatar">{item.profile?.nome?.[0]?.toUpperCase() ?? '?'}</span>
-              <span className="person-name"><b>{item.profile?.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.usuario_id}</small></span>
+              <b className="position">{String(item.ordem_fila).padStart(2, '0')}</b><span className="person-avatar">{(item.profile?.nome ?? item.nome)?.[0]?.toUpperCase() ?? '?'}</span>
+            <span className="person-name"><b>{item.profile?.nome ?? item.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.profile?.telefone ?? item.telefone ?? 'Cadastro público'}</small></span>
               <span className={item.pago ? 'paid' : 'unpaid'}>{item.pago ? '✓ Pago' : '◷ Pendente'}</span>
               <span className={'pill state-' + item.status.replaceAll(' ', '-')}>{statuses[item.status] ?? item.status}</span><span className="chevron">›</span>
             </button>
@@ -379,8 +388,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     </div>}
 
     {selectedPerson && <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedPerson(null) }}>
-      <section className="modal"><header><div><small className="eyebrow">DETALHES · SENHA {String(selectedPerson.ordem_fila).padStart(2, '0')}</small><h2>{selectedPerson.profile?.nome ?? 'Participante'}</h2></div><button onClick={() => setSelectedPerson(null)}>×</button></header>
-        <div className="details"><span>✉️ {selectedPerson.profile?.email}</span><span>☎️ {selectedPerson.profile?.telefone ?? 'Sem telefone'}</span><span>🪪 CPF {selectedPerson.profile?.cpf ?? 'Não informado'}</span><span>🎂 Nascimento: {formatBirthDate(selectedPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(selectedPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(selectedPerson.profile?.data_nascimento)} anos`}</span></div>
+      <section className="modal"><header><div><small className="eyebrow">DETALHES · SENHA {String(selectedPerson.ordem_fila).padStart(2, '0')}</small><h2>{selectedPerson.profile?.nome ?? selectedPerson.nome ?? 'Participante'}</h2></div><button onClick={() => setSelectedPerson(null)}>×</button></header>
+        <div className="details"><span>✉️ {selectedPerson.profile?.email ?? 'Sem e-mail cadastrado'}</span><span>☎️ {selectedPerson.profile?.telefone ?? selectedPerson.telefone ?? 'Sem telefone'}</span><span>🪪 CPF {selectedPerson.profile?.cpf ?? 'Não informado'}</span><span>🎂 Nascimento: {formatBirthDate(selectedPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(selectedPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(selectedPerson.profile?.data_nascimento)} anos`}</span></div>
         <form onSubmit={savePerson}>
           <label>Status<select name="status" defaultValue={selectedPerson.status}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="check"><input name="pago" type="checkbox" defaultChecked={selectedPerson.pago} /> Pagamento confirmado</label>
@@ -395,9 +404,9 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     {calledPerson && <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setCalledPerson(null) }}>
       <section className="modal called-person-modal" role="dialog" aria-modal="true" aria-labelledby="called-person-title">
         <header><div><small className="eyebrow">CHAMADA REALIZADA · {selectedEvent?.nome}</small><h2 id="called-person-title">Senha {String(calledPerson.ordem_fila).padStart(2, '0')}</h2></div><button type="button" onClick={() => setCalledPerson(null)} aria-label="Fechar">×</button></header>
-        <div className="called-person-card"><span className="called-avatar">{calledPerson.profile?.nome?.[0]?.toUpperCase() ?? '?'}</span><div><h3>{calledPerson.profile?.nome ?? 'Participante'}</h3><p>Está sendo atendido agora.</p></div></div>
-        <div className="details"><span>☎️ {calledPerson.profile?.telefone ?? 'Sem telefone cadastrado'}</span><span>✉️ {calledPerson.profile?.email ?? 'Sem e-mail cadastrado'}</span><span>🎂 Nascimento: {formatBirthDate(calledPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(calledPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(calledPerson.profile?.data_nascimento)} anos`}</span></div>
-        {calledPerson.profile?.telefone ? <a className="whatsapp-button" href={'https://wa.me/' + calledPerson.profile.telefone.replace(/\D/g, '') + '?text=' + encodeURIComponent('Olá, ' + calledPerson.profile.nome + '! Sua vez chegou no evento ' + (selectedEvent?.nome ?? '') + '. Sua senha é ' + String(calledPerson.ordem_fila).padStart(2, '0') + '.') } target="_blank" rel="noreferrer">☏ Chamar no WhatsApp</a> : <p className="whatsapp-missing">Cadastre um telefone no perfil para chamar pelo WhatsApp.</p>}
+        <div className="called-person-card"><span className="called-avatar">{(calledPerson.profile?.nome ?? calledPerson.nome)?.[0]?.toUpperCase() ?? '?'}</span><div><h3>{calledPerson.profile?.nome ?? calledPerson.nome ?? 'Participante'}</h3><p>Está sendo atendido agora.</p></div></div>
+        <div className="details"><span>☎️ {calledPerson.profile?.telefone ?? calledPerson.telefone ?? 'Sem telefone cadastrado'}</span><span>✉️ {calledPerson.profile?.email ?? 'Sem e-mail cadastrado'}</span><span>🎂 Nascimento: {formatBirthDate(calledPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(calledPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(calledPerson.profile?.data_nascimento)} anos`}</span></div>
+        {(calledPerson.profile?.telefone ?? calledPerson.telefone) ? <a className="whatsapp-button" href={'https://wa.me/' + (calledPerson.profile?.telefone ?? calledPerson.telefone)!.replace(/\D/g, '') + '?text=' + encodeURIComponent('Olá, ' + (calledPerson.profile?.nome ?? calledPerson.nome ?? 'tudo bem') + '! Sua vez chegou no evento ' + (selectedEvent?.nome ?? '') + '. Sua senha é ' + String(calledPerson.ordem_fila).padStart(2, '0') + '.') } target="_blank" rel="noreferrer">☏ Chamar no WhatsApp</a> : <p className="whatsapp-missing">Cadastre um telefone no perfil para chamar pelo WhatsApp.</p>}
         <div className="modal-actions"><button type="button" className="secondary" onClick={() => setCalledPerson(null)}>Fechar</button></div>
       </section>
     </div>}
