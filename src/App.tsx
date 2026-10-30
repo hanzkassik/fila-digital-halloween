@@ -70,8 +70,9 @@ export default function App() {
   const toggleTheme = () => setTheme((current) => current === 'dark' ? 'light' : 'dark')
   const logout = useCallback(async () => { if (supabase) await supabase.auth.signOut() }, [])
   const themeToggle = <ThemeToggle theme={theme} onToggle={toggleTheme} />
-  const publicEventMatch = /^\/events\/([^/]+)$/.exec(pathname.replace(/\/+$/, ''))
+  const publicEventMatch = /^\/events\/([^/]+)(?:\/([^/]+))?$/.exec(pathname.replace(/\/+$/, ''))
   const publicEventSlug = publicEventMatch ? decodeURIComponent(publicEventMatch[1]) : null
+  const publicQueueEntryId = publicEventMatch?.[2] ? decodeURIComponent(publicEventMatch[2]) : null
   const isUuid = publicEventSlug ? /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicEventSlug) : false
   const isPublicEventRoute = Boolean(publicEventSlug && !isUuid)
   const isActiveAdmin = Boolean(user && profile?.id === user.id && profile.papel === 'admin' && profile.status === 'ativo')
@@ -104,7 +105,7 @@ export default function App() {
 
   if (!supabase) return <main className="setup"><header className="brand">🎃 fila<span>do</span>halloween</header><section className="setup-card"><small>QUASE PRONTO</small><h1>Conecte seu Supabase</h1><p>Configure as variáveis para ativar o acesso e o painel.</p><code>VITE_SUPABASE_URL<br />VITE_SUPABASE_ANON_KEY</code>{themeToggle}</section></main>
   if (loading) return <main className="loading"><span>🎃</span><p>Preparando a fila...</p></main>
-  if (publicEventSlug && !isUuid) return <PublicEventPage slug={publicEventSlug} user={user} profile={profile} theme={theme} onToggleTheme={toggleTheme} onOpenProfile={() => { setProfileReturnPath(pathname); navigate('/profile') }} onLogout={() => void logout()} />
+  if (publicEventSlug && !isUuid) return <PublicEventPage slug={publicEventSlug} queueEntryId={publicQueueEntryId} user={user} theme={theme} onToggleTheme={toggleTheme} navigate={navigate} onOpenProfile={() => { setProfileReturnPath(pathname); navigate('/profile') }} onLogout={() => void logout()} />
   if (!user) return <AuthPage theme={theme} onToggleTheme={toggleTheme} />
   if (!isActiveAdmin) {
     if (pathname === '/profile' && profile?.id === user.id && profile.status === 'ativo') {

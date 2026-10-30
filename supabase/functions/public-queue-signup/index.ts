@@ -95,5 +95,5 @@ Deno.serve(async (request) => {
   }
 
   const entry = Array.isArray(data) ? data[0] : data
-  return json({ ok: true, queueEntry: entry ? { ordem_fila: entry.ordem_fila, status: entry.status, criado_em: entry.criado_em } : null }, 200, origin)
+  return json({ ok: true, queueEntry: entry ? { id: entry.id, ordem_fila: entry.ordem_fila, status: entry.status, criado_em: entry.criado_em } : null }, 200, origin)
 })

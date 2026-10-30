@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { EventRow, Profile, QueueRow } from '../../types'
 import ProfilePage from '../profile/ProfilePage'
@@ -90,6 +90,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [bannerFile, setBannerFile] = useState<File | null>(null)
   const [faviconFile, setFaviconFile] = useState<File | null>(null)
   const [showInactive, setShowInactive] = useState(false)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const queueRequestId = useRef(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -105,6 +107,25 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     setCreateUserOpen(false)
     setCreateUserEventId(undefined)
   }
+
+  function navigateFromMobileMenu(to: string) {
+    setMobileMenuOpen(false)
+    navigate(to)
+  }
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setMobileMenuOpen(false) }
+    window.addEventListener('keydown', closeOnEscape)
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', closeOnEscape)
+    }
+  }, [mobileMenuOpen])
+
+  useEffect(() => { setMobileMenuOpen(false) }, [routePath])
 
   const selectedEvent = events.find((event) => event.id === routeEventId) ?? null
 
@@ -131,23 +152,36 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   useEffect(() => { void loadEvents() }, [loadEvents])
 
   const loadQueue = useCallback(async (event: EventRow) => {
+    const requestId = ++queueRequestId.current
     setQueueLoading(true)
-    if (!supabase) { setQueueLoading(false); return [] as QueueRow[] }
-    const { data, error: queryError } = await supabase.rpc('listar_fila_evento', { p_evento_id: event.id })
-    if (queryError) { setError(queryError.message); setQueueLoading(false); return [] as QueueRow[] }
-    const rows = (data ?? []) as QueueRow[]
-    const ids = [...new Set(rows.map((row) => row.usuario_id).filter((id): id is string => Boolean(id)))]
-    const result = ids.length
-      ? await supabase.from('profiles').select('id,nome,email,papel,status,telefone,cpf,data_nascimento').in('id', ids)
-      : { data: [], error: null }
-    if (result.error) setError(result.error.message)
-    const people = (result.data ?? []) as Profile[]
-    const populated = rows.map((row) => ({ ...row, profile: row.usuario_id ? people.find((person) => person.id === row.usuario_id) : undefined }))
-    setQueue(populated)
-    const loadedIds = new Set(populated.map((row) => row.id))
-    setSelectedQueueIds((current) => current.filter((id) => loadedIds.has(id)))
-    setQueueLoading(false)
-    return populated
+    setError('')
+    try {
+      if (!supabase) return [] as QueueRow[]
+      const { data, error: queryError } = await supabase.rpc('listar_fila_evento', { p_evento_id: event.id })
+      if (queryError) throw queryError
+      const rows = (data ?? []) as QueueRow[]
+      const ids = [...new Set(rows.map((row) => row.usuario_id).filter((id): id is string => Boolean(id)))]
+      const result = ids.length
+        ? await supabase.from('profiles').select('id,nome,email,papel,status,telefone,cpf,data_nascimento').in('id', ids)
+        : { data: [], error: null }
+      if (result.error) throw result.error
+      const people = (result.data ?? []) as Profile[]
+      const populated = rows.map((row) => ({ ...row, profile: row.usuario_id ? people.find((person) => person.id === row.usuario_id) : undefined }))
+      if (requestId === queueRequestId.current) {
+        setQueue(populated)
+        const loadedIds = new Set(populated.map((row) => row.id))
+        setSelectedQueueIds((current) => current.filter((id) => loadedIds.has(id)))
+      }
+      return populated
+    } catch (caught) {
+      if (requestId === queueRequestId.current) {
+        setQueue([])
+        setError(errorMessage(caught, 'Não foi possível carregar a fila deste evento.'))
+      }
+      return [] as QueueRow[]
+    } finally {
+      if (requestId === queueRequestId.current) setQueueLoading(false)
+    }
   }, [])
   useEffect(() => { if (selectedEvent) void loadQueue(selectedEvent) }, [selectedEvent, loadQueue])
 
@@ -307,20 +341,21 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   }
 
   return <main className="dashboard">
-    <aside className="sidebar">
-      <a className="brand" href="/events" onClick={(event) => { event.preventDefault(); navigate('/events') }}>🎃 fila<span>do</span><br /> halloween</a>
+    {mobileMenuOpen && <button type="button" className="sidebar-backdrop" aria-label="Fechar menu" onClick={() => setMobileMenuOpen(false)} />}
+    <aside className={'sidebar' + (mobileMenuOpen ? ' is-open' : '')}>
+      <a className="brand" href="/events" onClick={(event) => { event.preventDefault(); navigateFromMobileMenu('/events') }}>🎃 fila<span>do</span><br /> halloween</a>
       <small className="side-label">MENU PRINCIPAL</small>
-      <button className={'nav-link ' + (activeView === 'dashboard' && !routeEventId ? 'active' : '')} onClick={() => navigate('/events')}>▦　Eventos</button>
-      <button className={'nav-link ' + (activeView === 'users' ? 'active' : '')} onClick={() => navigate('/users')}>♙　Usuários</button>
-      {selectedEvent && <button className="nav-link active">☷　Fila do evento</button>}
-      <button className={'nav-link ' + (activeView === 'profile' ? 'active' : '')} onClick={() => navigate('/profile')}>♙　Meu perfil</button>
+      <button className={'nav-link ' + (activeView === 'dashboard' && !routeEventId ? 'active' : '')} onClick={() => navigateFromMobileMenu('/events')}>▦　Eventos</button>
+      <button className={'nav-link ' + (activeView === 'users' ? 'active' : '')} onClick={() => navigateFromMobileMenu('/users')}>♙　Usuários</button>
+      {selectedEvent && <button className="nav-link active" onClick={() => setMobileMenuOpen(false)}>☷　Fila do evento</button>}
+      <button className={'nav-link ' + (activeView === 'profile' ? 'active' : '')} onClick={() => navigateFromMobileMenu('/profile')}>♙　Meu perfil</button>
       <div className="side-bottom">
         <div className="user-block"><b>{profile.nome[0]?.toUpperCase()}</b><span><strong>{profile.nome}</strong><small>Administrador</small></span></div>
-        {themeToggle}<button onClick={onLogout}>↪ Sair da conta</button>
+        {themeToggle}<button onClick={() => { setMobileMenuOpen(false); onLogout() }}>↪ Sair da conta</button>
       </div>
     </aside>
     <section className="main-panel">
-      <header className="mobile-top"><button className="brand" onClick={() => navigate('/events')}>🎃 filad<span>o</span>halloween</button><button className="mobile-users" onClick={() => navigate('/users')}>♙ Usuários</button><button className="mobile-profile" onClick={() => navigate('/profile')}>Perfil</button>{themeToggle}</header>
+      <header className="mobile-top"><button type="button" className="mobile-menu-toggle" aria-label={mobileMenuOpen ? 'Fechar menu' : 'Abrir menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}><span aria-hidden="true">{mobileMenuOpen ? '×' : '☰'}</span><small>{mobileMenuOpen ? 'Fechar' : 'Menu'}</small></button><button className="brand" onClick={() => navigateFromMobileMenu('/events')}>🎃 fila<span>do</span>halloween</button>{themeToggle}</header>
       <div className="page-title">
         <div><small className="eyebrow">PAINEL ADMINISTRATIVO</small><h1>{activeView === 'profile' ? 'Meu perfil' : activeView === 'users' ? userId ? 'Detalhes do usuário' : 'Usuários cadastrados' : selectedEvent?.nome ?? (routeEventId ? eventsLoading ? 'Carregando evento...' : 'Evento não encontrado' : 'Boa noite, ' + profile.nome.split(' ')[0])}</h1><p>{activeView === 'profile' ? 'Gerencie seus dados pessoais e de acesso.' : activeView === 'users' ? 'Consulte cadastros e participações por evento.' : selectedEvent ? 'Organize a fila deste evento.' : routeEventId ? 'Verifique o link ou volte para a lista de eventos.' : 'Gerencie seus eventos e acompanhe as filas.'}</p></div>
         {activeView === 'profile' ? <button className="secondary" onClick={() => navigate('/events')}>← Voltar ao painel</button> : activeView === 'users' ? userId ? <button className="secondary" onClick={() => navigate('/users')}>← Usuários</button> : <button className="secondary create-user-button" onClick={() => openCreateUser()}>＋ Criar usuário</button> : <div className="page-actions"><button className="secondary create-user-button" onClick={() => openCreateUser(routeEventId)}>＋ Criar usuário</button>{selectedEvent || routeEventId ? <button className="secondary" onClick={() => navigate('/events')}>← Eventos</button> : <button className="primary" onClick={() => { setEventForm({ status: 'ativo' }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>＋ Criar evento</button>}</div>}
@@ -335,7 +370,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         </div>
         <div className="section-head"><div><h2>Seus eventos</h2><p>Selecione um evento para abrir a fila.</p></div><label className="inactive-toggle"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Inativos</label></div>
         {visibleEvents.length ? <div className="event-grid">{visibleEvents.map((event) =>
-          <button className="event-card" key={event.id} onClick={() => { setQueue([]); setQueueLoading(true); navigate('/events/' + encodeURIComponent(event.id)); setMessage('') }}>
+          <button className="event-card" key={event.id} onClick={() => { setMobileMenuOpen(false); setQueue([]); setQueueLoading(true); setError(''); navigate('/events/' + encodeURIComponent(event.id)); setMessage('') }}>
             <div className="cover" style={event.imagem_capa ? { backgroundImage: 'linear-gradient(180deg, transparent, #17131de8), url(' + event.imagem_capa + ')' } : undefined}><span>● {event.status === 'ativo' ? 'Ativo' : 'Inativo'}</span><b>🎃</b></div>
             <div className="event-info"><small>{new Date(event.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</small><h3>{event.nome}</h3><p>{event.descricao || 'Um evento especial está esperando por você.'}</p><div>/{event.slug}<span>↗</span></div></div>
           </button>

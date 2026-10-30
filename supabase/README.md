@@ -26,6 +26,8 @@ A migração `20261029080000_allow_repeated_queue_entries.sql` permite que a mes
 
 Para adicionar um evento opcionalmente no mesmo formulário de criação, ou adicionar um perfil existente pela tela da fila, aplique também `migrations/20261029050000_admin_add_queue_entry.sql`. Essa migração fornece `admin_add_user_to_queue`, que valida evento e usuário ativos e atribui a próxima posição de forma serializada. A criação de novos usuários com evento usa a Edge Function `admin-create-user` e tenta desfazer a conta se a entrada na fila falhar.
 
+Para adicionar uma pessoa diretamente à fila administrativa sem criar ou selecionar uma conta, aplique `migrations/20261030100000_admin_add_manual_queue_entry.sql`. A função `admin_add_public_queue_entry` exige um administrador ativo, valida nome e telefone, registra os dados de pagamento e gera a próxima ordem sob bloqueio do evento. A tabela continua sem permissão de inserção direta pelo navegador.
+
 Em **Authentication → Email Templates**, configure os modelos **Magic Link**, **Confirm signup** e **Reset Password** para exibir `{{ .Token }}`. O painel pede códigos de seis dígitos; os modelos padrão podem enviar um link em vez do código.
 
 Novas contas do Supabase Auth recebem automaticamente uma linha em `public.profiles`. O campo `nome` vem de `raw_user_meta_data.nome` (ou do início do e-mail, se não for informado). Telefone internacional deve usar `+` seguido de 8 a 15 dígitos; CPF deve conter 11 dígitos sem pontuação.
