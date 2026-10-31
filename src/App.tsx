@@ -15,6 +15,7 @@ export default function App() {
   const [theme, setTheme] = useState(() => localStorage.getItem('fila-theme') === 'light' ? 'light' : 'dark')
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [passwordRecovery, setPasswordRecovery] = useState(false)
   const [profileReturnPath, setProfileReturnPath] = useState('/approval')
   const [loading, setLoading] = useState(isSupabaseConfigured)
   const [error, setError] = useState('')
@@ -63,6 +64,8 @@ export default function App() {
     const { data: listener } = supabase.auth.onAuthStateChange((authEvent, session) => {
       const currentUser = session?.user ?? null
       setUser(currentUser)
+      if (authEvent === 'PASSWORD_RECOVERY') setPasswordRecovery(true)
+      else if (authEvent === 'USER_UPDATED' || authEvent === 'SIGNED_OUT') setPasswordRecovery(false)
       if (currentUser) {
         if (authEvent === 'SIGNED_IN' || authEvent === 'USER_UPDATED') setProfile(null)
         window.setTimeout(() => void loadProfile(currentUser), 0)
@@ -82,7 +85,7 @@ export default function App() {
   const isActiveAdmin = Boolean(user && profile?.id === user.id && profile.papel === 'admin' && profile.status === 'ativo')
 
   useEffect(() => {
-    if (loading || isPublicEventRoute) return
+    if (loading || isPublicEventRoute || passwordRecovery) return
 
     if (!user && pathname !== '/auth') {
       const nextPath = pathname === '/' ? '/events' : pathname
@@ -105,11 +108,12 @@ export default function App() {
         : '/events'
       navigate(safePath, true)
     }
-  }, [loading, isPublicEventRoute, user, profile, isActiveAdmin, pathname, navigate])
+  }, [loading, isPublicEventRoute, passwordRecovery, user, profile, isActiveAdmin, pathname, navigate])
 
   if (!supabase) return <main className="setup"><header className="brand">🎃 fila<span>do</span>halloween</header><section className="setup-card"><small>QUASE PRONTO</small><h1>Conecte seu Supabase</h1><p>Configure as variáveis para ativar o acesso e o painel.</p><code>VITE_SUPABASE_URL<br />VITE_SUPABASE_ANON_KEY</code>{themeToggle}</section></main>
   if (loading) return <main className="loading"><span>🎃</span><p>Preparando a fila...</p></main>
   if (publicEventSlug && !isUuid) return <PublicEventPage slug={publicEventSlug} queueEntryId={publicQueueEntryId} user={user} theme={theme} onToggleTheme={toggleTheme} navigate={navigate} onOpenProfile={() => { setProfileReturnPath(pathname); navigate('/profile') }} onLogout={() => void logout()} />
+  if (pathname === '/auth' && passwordRecovery) return <AuthPage theme={theme} onToggleTheme={toggleTheme} passwordRecovery />
   if (!user) return <AuthPage theme={theme} onToggleTheme={toggleTheme} />
   if (!isActiveAdmin) {
     if (pathname === '/profile' && profile?.id === user.id && profile.status === 'ativo') {

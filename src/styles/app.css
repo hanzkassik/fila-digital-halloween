@@ -201,6 +201,10 @@ a { color:inherit; text-decoration:none; }
 .profile-note { display:flex; align-items:flex-start; gap:9px; padding:11px 12px; border:1px solid var(--line); border-radius:10px; color:var(--muted); background:var(--input); }
 .profile-note span { font-size:14px; }.profile-note p { margin:0; font-size:10px; line-height:1.5; }
 .profile-save { align-self:flex-start; min-width:170px; }
+.account-password { max-width:720px; margin-top:24px; padding-top:22px; border-top:1px solid var(--line); }
+.account-password h3 { margin:0 0 5px; font-size:15px; }
+.account-password>p { margin:0 0 16px; color:var(--muted); font-size:11px; }
+.password-form { max-width:520px; }
 .called-person-modal { width:min(100%,460px); }.called-person-card { display:flex; align-items:center; gap:12px; padding:14px; margin:4px 0 14px; border:1px solid var(--line); border-radius:13px; background:var(--surface2); }.called-avatar { display:grid; flex:0 0 46px; height:46px; place-items:center; border-radius:50%; color:var(--purple); background:#ab7cff28; font-size:18px; font-weight:800; }.called-person-card h3 { margin:0 0 4px; font-size:15px; }.called-person-card p { margin:0; color:var(--green); font-size:11px; }.whatsapp-button { display:flex; align-items:center; justify-content:center; gap:8px; min-height:46px; width:100%; padding:11px 15px; border-radius:11px; color:#fff; background:#168b55; text-decoration:none; font-size:13px; font-weight:800; }.whatsapp-button:hover { filter:brightness(1.08); }.whatsapp-missing { padding:10px 12px; border:1px solid var(--line); border-radius:10px; color:var(--muted); font-size:11px; }
 .mobile-users { display:none; border:1px solid var(--line); border-radius:9px; padding:7px 9px; color:var(--muted); background:var(--surface); font-size:10px; font-weight:700; white-space:nowrap; }
 .users-page { display:grid; gap:15px; }

@@ -17,6 +17,19 @@ export default function ProfilePage({ profile, onProfileUpdated, onLogout }: Pro
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
   const [deactivating, setDeactivating] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [passwordError, setPasswordError] = useState('')
+  const [passwordMessage, setPasswordMessage] = useState('')
+  const [passwordBusy, setPasswordBusy] = useState(false)
+
+  const passwordRules = [
+    { label: 'Pelo menos 8 caracteres', test: (value: string) => value.length >= 8 },
+    { label: 'Uma letra maiúscula', test: (value: string) => /[A-Z]/.test(value) },
+    { label: 'Uma letra minúscula', test: (value: string) => /[a-z]/.test(value) },
+    { label: 'Um número', test: (value: string) => /\d/.test(value) },
+    { label: 'Um caractere especial', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
+  ]
 
   async function save(event: FormEvent) {
     event.preventDefault()
@@ -50,6 +63,32 @@ export default function ProfilePage({ profile, onProfileUpdated, onLogout }: Pro
     } finally { setBusy(false) }
   }
 
+  async function changePassword(event: FormEvent) {
+    event.preventDefault()
+    if (!supabase) return
+    setPasswordError('')
+    setPasswordMessage('')
+    if (passwordRules.some((rule) => !rule.test(newPassword))) {
+      setPasswordError('A senha ainda não atende a todos os requisitos.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setPasswordError('A senha e a confirmação precisam ser iguais.')
+      return
+    }
+
+    setPasswordBusy(true)
+    try {
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+      if (updateError) throw updateError
+      setNewPassword('')
+      setConfirmPassword('')
+      setPasswordMessage('Sua senha foi alterada com sucesso.')
+    } catch (caught) {
+      setPasswordError(caught instanceof Error ? caught.message : 'Não foi possível alterar sua senha.')
+    } finally { setPasswordBusy(false) }
+  }
+
   async function deactivateAccount() {
     if (!supabase || !window.confirm('Excluir conta? Seus dados não serão apagados: seu perfil será apenas inativado e você será desconectado.')) return
     setDeactivating(true)
@@ -79,6 +118,20 @@ export default function ProfilePage({ profile, onProfileUpdated, onLogout }: Pro
       {error && <div className="error">{error}</div>}{message && <div className="notice">{message}</div>}
       <button className="primary profile-save" disabled={busy}>{busy ? 'Salvando...' : 'Salvar alterações'}</button>
     </form>
+    <section className="account-password">
+      <h3>Alterar senha</h3>
+      <p>Escolha uma senha nova para acessar sua conta.</p>
+      <form className="profile-form password-form" onSubmit={changePassword}>
+        <label>Nova senha<input type="password" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} required aria-describedby="profile-password-rules" /></label>
+        <ul className="password-rules" id="profile-password-rules" aria-live="polite">
+          {passwordRules.map((rule) => <li key={rule.label} className={rule.test(newPassword) ? 'valid' : ''}><span>{rule.test(newPassword) ? '✓' : '○'}</span>{rule.label}</li>)}
+        </ul>
+        <label>Confirme a nova senha<input type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} required aria-invalid={Boolean(confirmPassword) && newPassword !== confirmPassword} /></label>
+        {confirmPassword && <div className={newPassword === confirmPassword ? 'password-match valid' : 'password-match'}>{newPassword === confirmPassword ? '✓ As senhas coincidem.' : 'As senhas ainda não coincidem.'}</div>}
+        {passwordError && <div className="error">{passwordError}</div>}{passwordMessage && <div className="notice">{passwordMessage}</div>}
+        <button className="primary profile-save" disabled={passwordBusy}>{passwordBusy ? 'Alterando...' : 'Alterar senha'}</button>
+      </form>
+    </section>
     {profile.status === 'ativo' && <section className="account-deactivation">
       <h3>Excluir conta</h3><p>Esta ação não apaga seus dados: apenas inativa seu perfil e encerra sua sessão. Para voltar, peça a reativação a um administrador.</p>
       <button type="button" className="danger-outline" disabled={deactivating} onClick={() => void deactivateAccount()}>{deactivating ? 'Inativando...' : 'Excluir conta'}</button>

@@ -7,9 +7,9 @@ import PhoneNumberField from '../../components/PhoneNumberField'
 import { appUrl } from '../../lib/paths'
 import GoogleSignInButton from '../../components/GoogleSignInButton'
 
-type Step = 'login' | 'signup' | 'recover' | 'verify'
+type Step = 'login' | 'signup' | 'recover' | 'verify' | 'reset-password'
 type Purpose = 'login' | 'signup' | 'recover'
-type Props = { theme: string; onToggleTheme: () => void }
+type Props = { theme: string; onToggleTheme: () => void; passwordRecovery?: boolean }
 
 const passwordRules = [
   { label: 'Pelo menos 8 caracteres', test: (value: string) => value.length >= 8 },
@@ -19,7 +19,7 @@ const passwordRules = [
   { label: 'Um caractere especial', test: (value: string) => /[^A-Za-z0-9]/.test(value) },
 ]
 
-export default function AuthPage({ theme, onToggleTheme }: Props) {
+export default function AuthPage({ theme, onToggleTheme, passwordRecovery = false }: Props) {
   const [step, setStep] = useState<Step>('login')
   const [purpose, setPurpose] = useState<Purpose>('login')
   const [email, setEmail] = useState('')
@@ -36,12 +36,30 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => {
+    if (passwordRecovery) {
+      setPurpose('recover')
+      setStep('reset-password')
+      setMessage('O link foi validado. Defina sua nova senha abaixo.')
+    }
+  }, [passwordRecovery])
+
+  useEffect(() => {
+    const { data: { subscription } } = supabase?.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setPurpose('recover')
+        setStep('reset-password')
+        setToken('')
+        setError('')
+        setMessage('O link foi validado. Defina sua nova senha abaixo.')
+      }
+    }) ?? { data: { subscription: null } }
+
     const hash = window.location.hash
-    if (!hash) return
+    if (!hash) return () => subscription?.unsubscribe()
     const params = new URLSearchParams(hash.slice(1))
     const errorCode = params.get('error_code')
     const authError = params.get('error')
-    if (!errorCode && !authError) return
+    if (!errorCode && !authError) return () => subscription?.unsubscribe()
 
     if (errorCode === 'otp_expired') {
       setError('Este link de acesso expirou ou já foi usado. Solicite um novo link e abra o e-mail mais recente.')
@@ -52,6 +70,7 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
     }
 
     window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search)
+    return () => subscription?.unsubscribe()
   }, [])
 
   function showVerification(action: Purpose, text: string) {
@@ -107,12 +126,20 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
         if (authError) throw authError
         showVerification('signup', 'Código enviado. Confirme seu e-mail para concluir o cadastro.')
       } else if (step === 'recover') {
-        const { error: authError } = await supabase.auth.resetPasswordForEmail(email.trim())
+        const redirectTo = `${window.location.origin}${appUrl('/auth')}`
+        const { error: authError } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
         if (authError) throw authError
-        showVerification('recover', 'Se houver uma conta com esse e-mail, enviaremos um código de recuperação.')
+        showVerification('recover', 'Se houver uma conta com esse e-mail, enviaremos um link de recuperação ou código. Abra o link para definir a nova senha; se receber um código, informe-o abaixo.')
+      } else if (step === 'reset-password') {
+        if (passwordRules.some((rule) => !rule.test(newPassword))) throw new Error('A nova senha ainda não atende a todos os requisitos.')
+        if (newPassword !== confirmPassword) throw new Error('A senha e a confirmação precisam ser iguais.')
+        const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+        if (updateError) throw updateError
+        setMessage('Senha alterada com sucesso.')
       } else {
         if (token.trim().length < 6) throw new Error('Digite o código enviado por e-mail.')
-        if (purpose === 'recover' && newPassword.length < 8) throw new Error('A nova senha precisa ter pelo menos 8 caracteres.')
+        if (purpose === 'recover' && passwordRules.some((rule) => !rule.test(newPassword))) throw new Error('A nova senha ainda não atende a todos os requisitos.')
+        if (purpose === 'recover' && newPassword !== confirmPassword) throw new Error('A senha e a confirmação precisam ser iguais.')
         const type = purpose === 'signup' ? 'signup' : purpose === 'recover' ? 'recovery' : 'email'
         const { error: verifyError } = await supabase.auth.verifyOtp({ email: email.trim(), token: token.trim(), type })
         if (verifyError) throw verifyError
@@ -131,12 +158,12 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
     setBusy(true); setError('')
     try {
       const result = purpose === 'recover'
-        ? await supabase.auth.resetPasswordForEmail(email.trim())
+        ? await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}${appUrl('/auth')}` })
         : purpose === 'signup'
           ? await supabase.auth.resend({ type: 'signup', email: email.trim() })
           : await supabase.auth.signInWithOtp({ email: email.trim(), options: { shouldCreateUser: false } })
       if (result.error) throw result.error
-      setMessage('Enviamos um novo código.')
+      setMessage(purpose === 'recover' ? 'Enviamos um novo link ou código de recuperação.' : 'Enviamos um novo código.')
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'Não foi possível reenviar.') }
     finally { setBusy(false) }
   }
@@ -146,8 +173,8 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
     <section className="auth-card">
       <div className="auth-art"><span>☾</span><b>🎃</b><i>✦</i></div>
       <small className="eyebrow">SUA NOITE, SEM ESPERA</small>
-      <h1>{step === 'signup' ? 'Entre para a fila' : step === 'recover' ? 'Vamos recuperar' : step === 'verify' ? 'Confira seu e-mail' : 'A magia começa aqui'}</h1>
-      <p className="description">{step === 'signup' ? 'Crie sua conta e aguarde a aprovação da equipe.' : step === 'recover' ? 'Enviaremos um código para você criar uma nova senha.' : step === 'verify' ? 'Digite o código enviado para ' + email : 'Acesse sua conta para acompanhar eventos especiais.'}</p>
+      <h1>{step === 'signup' ? 'Entre para a fila' : step === 'recover' ? 'Vamos recuperar' : step === 'verify' ? 'Confira seu e-mail' : step === 'reset-password' ? 'Crie uma nova senha' : 'A magia começa aqui'}</h1>
+      <p className="description">{step === 'signup' ? 'Crie sua conta e aguarde a aprovação da equipe.' : step === 'recover' ? 'Enviaremos um link ou código para você criar uma nova senha.' : step === 'verify' ? (purpose === 'recover' ? 'Abra o link recebido ou informe o código enviado para ' + email : 'Digite o código enviado para ' + email) : step === 'reset-password' ? 'Escolha uma senha segura para sua conta.' : 'Acesse sua conta para acompanhar eventos especiais.'}</p>
       {step !== 'verify' ? <div className="tabs"><button className={step === 'login' ? 'active' : ''} onClick={() => { setStep('login'); setError(''); setMessage('') }}>Entrar</button><button className={step === 'signup' ? 'active' : ''} onClick={() => { setStep('signup'); setError(''); setMessage('') }}>Criar conta</button></div> : <div className="verify-caption">✉️ Código de verificação</div>}
       <form className="form" onSubmit={submit}>
         {step === 'signup' && <>
@@ -167,14 +194,22 @@ export default function AuthPage({ theme, onToggleTheme }: Props) {
         </>}
         {step === 'verify' && <>
           <label>Código de 6 dígitos<input className="otp" inputMode="numeric" autoComplete="one-time-code" value={token} onChange={(e) => setToken(e.target.value.replace(/\s/g, ''))} placeholder="000000" required /></label>
-          {purpose === 'recover' && <label>Nova senha<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} autoComplete="new-password" required /></label>}
+          {purpose === 'recover' && <>
+            <label>Nova senha<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} minLength={8} autoComplete="new-password" required /></label>
+            <label>Confirme a nova senha<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} minLength={8} autoComplete="new-password" required /></label>
+          </>}
+        </>}
+        {step === 'reset-password' && <>
+          <label>Nova senha<input type="password" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} autoComplete="new-password" required aria-describedby="password-rules" /></label>
+          <ul className="password-rules" id="password-rules" aria-live="polite">{passwordRules.map((rule) => <li key={rule.label} className={rule.test(newPassword) ? 'valid' : ''}><span>{rule.test(newPassword) ? '✓' : '○'}</span>{rule.label}</li>)}</ul>
+          <label>Confirme a nova senha<input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} autoComplete="new-password" required aria-invalid={Boolean(confirmPassword) && newPassword !== confirmPassword} /></label>
         </>}
         {message && <div className="notice">{message}</div>}{error && <div className="error">{error}</div>}
-        <button className="primary" disabled={busy}>{busy ? 'Só um instante...' : step === 'login' ? (passwordMode ? 'Entrar na conta' : 'Enviar código por e-mail') : step === 'signup' ? 'Criar conta e enviar código' : step === 'recover' ? 'Enviar código de recuperação' : purpose === 'recover' ? 'Redefinir senha' : 'Confirmar código'}<span>→</span></button>
+        <button className="primary" disabled={busy}>{busy ? 'Só um instante...' : step === 'login' ? (passwordMode ? 'Entrar na conta' : 'Enviar código por e-mail') : step === 'signup' ? 'Criar conta e enviar código' : step === 'recover' ? 'Enviar link de recuperação' : step === 'reset-password' ? 'Salvar nova senha' : purpose === 'recover' ? 'Redefinir senha' : 'Confirmar código'}<span>→</span></button>
       </form>
       {step === 'login' && <div className="auth-social"><span>ou entre com</span><GoogleSignInButton onClick={() => void signInWithGoogle()} disabled={busy} /><small>Na primeira entrada, criaremos seu perfil como usuário padrão, sujeito à aprovação do administrador.</small></div>}
       {step === 'login' && <div className="auth-links"><button onClick={() => setPasswordMode(!passwordMode)}>{passwordMode ? 'Entrar com código por e-mail' : 'Entrar com senha'}</button><button onClick={() => { setStep('recover'); setError(''); setMessage('') }}>Esqueci minha senha</button></div>}
-      {step === 'verify' && <div className="auth-links"><button disabled={busy} onClick={() => void resendCode()}>Reenviar código</button><button onClick={() => setStep(purpose === 'signup' ? 'signup' : 'login')}>Voltar</button></div>}
+      {step === 'verify' && <div className="auth-links"><button disabled={busy} onClick={() => void resendCode()}>{purpose === 'recover' ? 'Reenviar link ou código' : 'Reenviar código'}</button><button onClick={() => setStep(purpose === 'signup' ? 'signup' : 'login')}>Voltar</button></div>}
       {step === 'recover' && <div className="auth-links"><button onClick={() => setStep('login')}>Voltar para entrar</button></div>}
       <footer className="auth-footer">🦇 Uma experiência encantadoramente organizada</footer>
     </section>
