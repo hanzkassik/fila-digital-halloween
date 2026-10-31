@@ -298,4 +298,21 @@ a { color:inherit; text-decoration:none; }
   .queue-row-meta .pill { padding:4px 7px; }
   .queue-row-content>.chevron { grid-column:4; grid-row:1/3; justify-self:end; align-self:center; }
 }
+.share-event-button { white-space:nowrap; }
+.event-qr-modal { width:min(100%,680px); max-height:min(92dvh,1000px); }
+.event-qr-preview { width:min(100%,450px); max-height:55dvh; margin:0 auto; overflow:auto; border-radius:12px; background:#fffaf2; }
+.event-qr-preview svg { display:block; width:100%; height:auto; }
+.event-qr-actions { flex-wrap:wrap; }
+.event-qr-error { margin:10px 0 0; }
+@media(max-width:640px) {
+  .queue-head .secondary { flex:1 1 calc(50% - 30px); margin:0; justify-content:center; padding-inline:8px; }
+  .queue-head .refresh { flex:0 0 40px; }
+}
+@media(max-width:680px) {
+  .event-qr-modal { width:100%; padding:16px; }
+  .event-qr-modal>header h2 { font-size:18px; }
+  .event-qr-preview { width:min(100%,380px); max-height:48dvh; }
+  .event-qr-actions>* { flex:1 1 calc(50% - 8px); }
+  .event-qr-actions>.primary { flex-basis:100%; }
+}
 

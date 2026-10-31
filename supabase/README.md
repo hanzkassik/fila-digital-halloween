@@ -60,3 +60,5 @@ Não inclua papel de administrador nos metadados públicos de cadastro. A funç�
 Perfis e eventos usam `ativo` / `inativo`. A fila começa em `na fila` e também aceita `em atendimento`, `atendido`, `cancelado` e `inativo`. Uma pessoa vê apenas suas entradas não inativas; administradores podem consultar todos os estados. Formas de pagamento aceitas: `pix`, `dinheiro`, `cartao_credito`, `cartao_debito`, `transferencia` e `outro`.
 
 Eventos possuem `slug` único, obrigatório e com até 80 caracteres. Use letras minúsculas, números e hífens entre palavras (por exemplo, `festa-junina-2027`).
+
+Para configurar a mensagem do botão **Chamar no WhatsApp**, aplique `migrations/20261031100000_event_whatsapp_default_message.sql`. O campo `mensagem_padrao_whatsapp` de cada evento começa com uma mensagem padrão editável e aceita `{{nome_evento}}`, `{{nome_pessoa}}` e `{{numero_senha}}`; ao abrir o WhatsApp, o painel substitui essas variáveis pelos dados da chamada.

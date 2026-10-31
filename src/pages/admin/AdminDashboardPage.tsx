@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent, type ReactNode } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { EventRow, Profile, QueueRow } from '../../types'
 import ProfilePage from '../profile/ProfilePage'
@@ -10,12 +10,14 @@ import { appAsset } from '../../lib/paths'
 
 type Props = { profile: Profile; themeToggle: ReactNode; pathname: string; navigate: (to: string, replace?: boolean) => void; onLogout: () => void; onProfileUpdated: (profile: Profile) => void }
 const statuses: Record<string, string> = { 'na fila': 'Na fila', 'em atendimento': 'Em atendimento', atendido: 'Atendido', cancelado: 'Cancelado', inativo: 'Inativo' }
+const defaultWhatsappMessage = 'Olá, {{nome_pessoa}}! Sua vez chegou no evento {{nome_evento}}. Sua senha é {{numero_senha}}.'
 type QueueSort = 'order-asc' | 'order-desc' | 'status' | 'name'
 const queueStatusOrder: Record<string, number> = { 'em atendimento': 0, 'na fila': 1, atendido: 2, cancelado: 3, inativo: 4 }
 const methods: Record<string, string> = { pix: 'Pix', dinheiro: 'Dinheiro', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', transferencia: 'Transferência', outro: 'Outro' }
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
 const eventImagesBucket = 'fila-digital-halloween'
 const createUserDraftOpenKey = 'fila-admin-create-user-open'
+const EventQrModal = lazy(() => import('./components/EventQrModal'))
 function hasRestorableCreateUserModal() {
   try { return sessionStorage.getItem(createUserDraftOpenKey) === '1' } catch { return false }
 }
@@ -82,6 +84,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [selectedPerson, setSelectedPerson] = useState<QueueRow | null>(null)
   const [calledPerson, setCalledPerson] = useState<QueueRow | null>(null)
   const [eventModalOpen, setEventModalOpen] = useState(false)
+  const [eventQrOpen, setEventQrOpen] = useState(false)
   const [createUserOpen, setCreateUserOpen] = useState(hasRestorableCreateUserModal)
   const [addQueueOpen, setAddQueueOpen] = useState(false)
   const [createUserEventId, setCreateUserEventId] = useState<string | undefined>()
@@ -128,6 +131,39 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   useEffect(() => { setMobileMenuOpen(false) }, [routePath])
 
   const selectedEvent = events.find((event) => event.id === routeEventId) ?? null
+  const publicEventUrl = selectedEvent?.slug
+    ? new URL(appAsset(`events/${encodeURIComponent(selectedEvent.slug)}`), window.location.origin).toString()
+    : ''
+
+  async function shareSelectedEvent() {
+    if (!selectedEvent?.slug || !publicEventUrl) return
+    const shareData = {
+      title: selectedEvent.nome,
+      text: `Acesse o evento ${selectedEvent.nome} e entre na fila:`,
+      url: publicEventUrl,
+    }
+
+    if (navigator.share) {
+      try {
+        await navigator.share(shareData)
+        setMessage('Evento compartilhado.')
+        setError('')
+        return
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === 'AbortError') return
+      }
+    }
+
+    try {
+      await navigator.clipboard.writeText(publicEventUrl)
+      setMessage('Link público do evento copiado para compartilhar.')
+      setError('')
+    } catch {
+      window.prompt('Copie o link público do evento:', publicEventUrl)
+      setMessage('Link público do evento pronto para compartilhar.')
+      setError('')
+    }
+  }
 
   useEffect(() => {
     const faviconLink = document.querySelector<HTMLLinkElement>('link[rel~="icon"]')
@@ -208,6 +244,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         nome: eventForm.nome?.trim(),
         data: eventForm.data,
         descricao: eventForm.descricao || null,
+        mensagem_padrao_whatsapp: eventForm.mensagem_padrao_whatsapp?.trim() || defaultWhatsappMessage,
         status: eventForm.status ?? 'ativo',
       }
       if (!eventId) {
@@ -259,7 +296,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         }
         if (updateError) throw updateError
       }
-      setEventModalOpen(false); setEventForm({ status: 'ativo' }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); await loadEvents()
+      setEventModalOpen(false); setEventForm({ status: 'ativo', mensagem_padrao_whatsapp: defaultWhatsappMessage }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); await loadEvents()
     } catch (caught) {
       if (uploadedPaths.length) {
         try { await supabase.storage.from(eventImagesBucket).remove(uploadedPaths) } catch { /* Keep the original save error. */ }
@@ -358,7 +395,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
       <header className="mobile-top"><button type="button" className="mobile-menu-toggle" aria-label={mobileMenuOpen ? 'Fechar menu' : 'Abrir menu'} aria-expanded={mobileMenuOpen} onClick={() => setMobileMenuOpen((open) => !open)}><span aria-hidden="true">{mobileMenuOpen ? '×' : '☰'}</span><small>{mobileMenuOpen ? 'Fechar' : 'Menu'}</small></button><button className="brand" onClick={() => navigateFromMobileMenu('/events')}>🎃 fila<span>do</span>halloween</button>{themeToggle}</header>
       <div className="page-title">
         <div><small className="eyebrow">PAINEL ADMINISTRATIVO</small><h1>{activeView === 'profile' ? 'Meu perfil' : activeView === 'users' ? userId ? 'Detalhes do usuário' : 'Usuários cadastrados' : selectedEvent?.nome ?? (routeEventId ? eventsLoading ? 'Carregando evento...' : 'Evento não encontrado' : 'Boa noite, ' + profile.nome.split(' ')[0])}</h1><p>{activeView === 'profile' ? 'Gerencie seus dados pessoais e de acesso.' : activeView === 'users' ? 'Consulte cadastros e participações por evento.' : selectedEvent ? 'Organize a fila deste evento.' : routeEventId ? 'Verifique o link ou volte para a lista de eventos.' : 'Gerencie seus eventos e acompanhe as filas.'}</p></div>
-        {activeView === 'profile' ? <button className="secondary" onClick={() => navigate('/events')}>← Voltar ao painel</button> : activeView === 'users' ? userId ? <button className="secondary" onClick={() => navigate('/users')}>← Usuários</button> : <button className="secondary create-user-button" onClick={() => openCreateUser()}>＋ Criar usuário</button> : <div className="page-actions"><button className="secondary create-user-button" onClick={() => openCreateUser(routeEventId)}>＋ Criar usuário</button>{selectedEvent || routeEventId ? <button className="secondary" onClick={() => navigate('/events')}>← Eventos</button> : <button className="primary" onClick={() => { setEventForm({ status: 'ativo' }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>＋ Criar evento</button>}</div>}
+        {activeView === 'profile' ? <button className="secondary" onClick={() => navigate('/events')}>← Voltar ao painel</button> : activeView === 'users' ? userId ? <button className="secondary" onClick={() => navigate('/users')}>← Usuários</button> : <button className="secondary create-user-button" onClick={() => openCreateUser()}>＋ Criar usuário</button> : <div className="page-actions"><button className="secondary create-user-button" onClick={() => openCreateUser(routeEventId)}>＋ Criar usuário</button>{selectedEvent || routeEventId ? <button className="secondary" onClick={() => navigate('/events')}>← Eventos</button> : <button className="primary" onClick={() => { setEventForm({ status: 'ativo', mensagem_padrao_whatsapp: defaultWhatsappMessage }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>＋ Criar evento</button>}</div>}
       </div>
       {error && <div className="error alert">{error}<button onClick={() => setError('')}>×</button></div>}
       {message && <div className="notice alert">{message}<button onClick={() => setMessage('')}>×</button></div>}
@@ -381,7 +418,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
           <div className="waiting-stat"><small>Aguardando</small><b>{queueLoading ? '…' : waitingCount}</b><span>pessoas</span></div>
           <button className="call-next" disabled={busy || queueLoading || selectedEvent.status !== 'ativo'} onClick={() => void callNext()}>📣 <b>{busy ? 'Chamando...' : 'Chamar próximo'}<small>Avançar em ordem da fila</small></b> →</button>
         </div>
-        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
+        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="secondary share-event-button" onClick={() => void shareSelectedEvent()}>↗ Compartilhar evento</button><button className="secondary qr-event-button" onClick={() => setEventQrOpen(true)}>▦ Gerar QR Code</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
         {!queueLoading && queue.length > 0 && <div className="queue-selection-toolbar">
           <label className="queue-select-all"><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> <span>Selecionar todos</span></label>
           <span>{selectedQueueIds.length} selecionado{selectedQueueIds.length === 1 ? '' : 's'}</span>
@@ -407,6 +444,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
 
     {addQueueOpen && selectedEvent && <AddToQueueModal event={selectedEvent} onClose={() => setAddQueueOpen(false)} onAdded={(name) => { setAddQueueOpen(false); setMessage(name + ' foi adicionado à fila.'); void loadQueue(selectedEvent) }} onCreateNew={() => { setAddQueueOpen(false); openCreateUser(selectedEvent.id) }} />}
 
+    {eventQrOpen && selectedEvent && publicEventUrl && <Suspense fallback={<div className="scrim event-qr-scrim"><div className="modal" role="status">Preparando QR Code do evento…</div></div>}><EventQrModal eventName={selectedEvent.nome} slug={selectedEvent.slug} publicUrl={publicEventUrl} onClose={() => setEventQrOpen(false)} /></Suspense>}
+
     {eventModalOpen && <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setEventModalOpen(false) }}>
       <section className="modal"><header><div><small className="eyebrow">EVENTO</small><h2>{eventForm.id ? 'Editar evento' : 'Criar evento'}</h2></div><button onClick={() => setEventModalOpen(false)}>×</button></header>
         <form onSubmit={saveEvent}>
@@ -414,6 +453,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
           <label>Slug<div className="slug"><span>/</span><input required maxLength={80} pattern="[a-z0-9]+(-[a-z0-9]+)*" value={eventForm.slug ?? ''} onChange={(e) => setEventForm({ ...eventForm, slug: e.target.value })} placeholder="noite-das-bruxas" /></div><small>Único, minúsculo e separado por hífens.</small></label>
           <label>Data e horário<input required type="datetime-local" value={eventForm.data ?? ''} onChange={(e) => setEventForm({ ...eventForm, data: e.target.value })} /></label>
           <label>Descrição<textarea rows={3} value={eventForm.descricao ?? ''} onChange={(e) => setEventForm({ ...eventForm, descricao: e.target.value })} /></label>
+          <label>Mensagem padrão do WhatsApp ao chamar<textarea rows={4} maxLength={2000} required value={eventForm.mensagem_padrao_whatsapp ?? defaultWhatsappMessage} onChange={(e) => setEventForm({ ...eventForm, mensagem_padrao_whatsapp: e.target.value })} /><small>Variáveis disponíveis: <code>{'{{nome_evento}}'}</code>, <code>{'{{nome_pessoa}}'}</code> e <code>{'{{numero_senha}}'}</code>.</small></label>
           <EventImageField label="Imagem de capa" currentUrl={eventForm.imagem_capa} file={coverFile} disabled={busy} onChange={setCoverFile} />
           <EventImageField label="Banner" currentUrl={eventForm.banner} file={bannerFile} disabled={busy} onChange={setBannerFile} />
           <EventImageField label="Favicon do evento" currentUrl={eventForm.favicon} file={faviconFile} disabled={busy} helperText="Imagem quadrada recomendada. Será exibida na aba ao abrir este evento." onChange={setFaviconFile} />
@@ -443,7 +483,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         <header><div><small className="eyebrow">CHAMADA REALIZADA · {selectedEvent?.nome}</small><h2 id="called-person-title">Senha {String(calledPerson.ordem_fila).padStart(2, '0')}</h2></div><button type="button" onClick={() => setCalledPerson(null)} aria-label="Fechar">×</button></header>
         <div className="called-person-card"><span className="called-avatar">{(calledPerson.profile?.nome ?? calledPerson.nome)?.[0]?.toUpperCase() ?? '?'}</span><div><h3>{calledPerson.profile?.nome ?? calledPerson.nome ?? 'Participante'}</h3><p>Está sendo atendido agora.</p></div></div>
         <div className="details"><span>☎️ {calledPerson.profile?.telefone ?? calledPerson.telefone ?? 'Sem telefone cadastrado'}</span><span>✉️ {calledPerson.profile?.email ?? 'Sem e-mail cadastrado'}</span><span>🎂 Nascimento: {formatBirthDate(calledPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(calledPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(calledPerson.profile?.data_nascimento)} anos`}</span></div>
-        {(calledPerson.profile?.telefone ?? calledPerson.telefone) ? <a className="whatsapp-button" href={'https://wa.me/' + (calledPerson.profile?.telefone ?? calledPerson.telefone)!.replace(/\D/g, '') + '?text=' + encodeURIComponent('Olá, ' + (calledPerson.profile?.nome ?? calledPerson.nome ?? 'tudo bem') + '! Sua vez chegou no evento ' + (selectedEvent?.nome ?? '') + '. Sua senha é ' + String(calledPerson.ordem_fila).padStart(2, '0') + '.') } target="_blank" rel="noreferrer">☏ Chamar no WhatsApp</a> : <p className="whatsapp-missing">Cadastre um telefone no perfil para chamar pelo WhatsApp.</p>}
+        {(calledPerson.profile?.telefone ?? calledPerson.telefone) ? <a className="whatsapp-button" href={'https://wa.me/' + (calledPerson.profile?.telefone ?? calledPerson.telefone)!.replace(/\D/g, '') + '?text=' + encodeURIComponent((selectedEvent?.mensagem_padrao_whatsapp?.trim() || defaultWhatsappMessage).replaceAll('{{nome_evento}}', selectedEvent?.nome ?? '').replaceAll('{{nome_pessoa}}', calledPerson.profile?.nome ?? calledPerson.nome ?? 'Participante').replaceAll('{{numero_senha}}', String(calledPerson.ordem_fila).padStart(2, '0')))} target="_blank" rel="noreferrer">☏ Chamar no WhatsApp</a> : <p className="whatsapp-missing">Cadastre um telefone no perfil para chamar pelo WhatsApp.</p>}
         <div className="modal-actions"><button type="button" className="secondary" onClick={() => setCalledPerson(null)}>Fechar</button></div>
       </section>
     </div>}
