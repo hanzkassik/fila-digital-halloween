@@ -12,9 +12,11 @@ type Props = { profile: Profile; themeToggle: ReactNode; pathname: string; navig
 const statuses: Record<string, string> = { 'na fila': 'Na fila', 'em atendimento': 'Em atendimento', atendido: 'Atendido', cancelado: 'Cancelado', inativo: 'Inativo' }
 const defaultWhatsappMessage = 'Olá, {{nome_pessoa}}! Sua vez chegou no evento {{nome_evento}}. Sua senha é {{numero_senha}}.'
 type QueueSort = 'order-asc' | 'order-desc' | 'status' | 'name'
+type QueueFilter = 'all' | 'waiting' | 'serving' | 'unpaid'
 const queueStatusOrder: Record<string, number> = { 'em atendimento': 0, 'na fila': 1, atendido: 2, cancelado: 3, inativo: 4 }
 const methods: Record<string, string> = { pix: 'Pix', dinheiro: 'Dinheiro', cartao_credito: 'Cartão de crédito', cartao_debito: 'Cartão de débito', transferencia: 'Transferência', outro: 'Outro' }
 const slugify = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80)
+const normalizeSearch = (value: string) => value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('pt-BR').trim()
 const eventImagesBucket = 'fila-digital-halloween'
 const createUserDraftOpenKey = 'fila-admin-create-user-open'
 const EventQrModal = lazy(() => import('./components/EventQrModal'))
@@ -79,6 +81,8 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   const [eventsLoading, setEventsLoading] = useState(true)
   const [queue, setQueue] = useState<QueueRow[]>([])
   const [queueSort, setQueueSort] = useState<QueueSort>('order-asc')
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>('all')
+  const [queueSearch, setQueueSearch] = useState('')
   const [selectedQueueIds, setSelectedQueueIds] = useState<string[]>([])
   const [queueLoading, setQueueLoading] = useState(false)
   const [selectedPerson, setSelectedPerson] = useState<QueueRow | null>(null)
@@ -187,10 +191,9 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
   }, [])
   useEffect(() => { void loadEvents() }, [loadEvents])
 
-  const loadQueue = useCallback(async (event: EventRow) => {
+  const loadQueue = useCallback(async (event: EventRow, showLoader = true) => {
     const requestId = ++queueRequestId.current
-    setQueueLoading(true)
-    setError('')
+    if (showLoader) { setQueueLoading(true); setError('') }
     try {
       if (!supabase) return [] as QueueRow[]
       const { data, error: queryError } = await supabase.rpc('listar_fila_evento', { p_evento_id: event.id })
@@ -210,16 +213,28 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
       }
       return populated
     } catch (caught) {
-      if (requestId === queueRequestId.current) {
+      if (requestId === queueRequestId.current && showLoader) {
         setQueue([])
         setError(errorMessage(caught, 'Não foi possível carregar a fila deste evento.'))
       }
       return [] as QueueRow[]
     } finally {
-      if (requestId === queueRequestId.current) setQueueLoading(false)
+      if (requestId === queueRequestId.current && showLoader) setQueueLoading(false)
     }
   }, [])
   useEffect(() => { if (selectedEvent) void loadQueue(selectedEvent) }, [selectedEvent, loadQueue])
+  useEffect(() => {
+    if (!selectedEvent || queueLoading || busy) return
+    const refreshIfVisible = () => {
+      if (document.visibilityState === 'visible') void loadQueue(selectedEvent, false)
+    }
+    const interval = window.setInterval(refreshIfVisible, 6000)
+    document.addEventListener('visibilitychange', refreshIfVisible)
+    return () => {
+      window.clearInterval(interval)
+      document.removeEventListener('visibilitychange', refreshIfVisible)
+    }
+  }, [selectedEvent, queueLoading, busy, loadQueue])
 
   const visibleEvents = useMemo(() => events.filter((event) => showInactive || event.status === 'ativo'), [events, showInactive])
   const currentServing = queue.find((item) => item.status === 'em atendimento')
@@ -230,6 +245,20 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     if (queueSort === 'name') return (a.profile?.nome ?? a.nome ?? '').localeCompare(b.profile?.nome ?? b.nome ?? '', 'pt-BR', { sensitivity: 'base' }) || a.ordem_fila - b.ordem_fila
     return a.ordem_fila - b.ordem_fila
   }), [queue, queueSort])
+  const filteredQueue = useMemo(() => {
+    const term = normalizeSearch(queueSearch)
+    const digits = queueSearch.replace(/\D/g, '')
+    return sortedQueue.filter((item) => {
+      if (queueFilter === 'waiting' && item.status !== 'na fila') return false
+      if (queueFilter === 'serving' && item.status !== 'em atendimento') return false
+      if (queueFilter === 'unpaid' && item.pago) return false
+      if (!term) return true
+      const fields = [item.profile?.nome, item.nome, item.profile?.email, item.profile?.telefone, item.telefone, String(item.ordem_fila)]
+      const textMatch = fields.some((field) => field && normalizeSearch(field).includes(term))
+      const phoneMatch = digits.length > 0 && [item.profile?.telefone, item.telefone].some((phone) => phone?.replace(/\D/g, '').includes(digits))
+      return textMatch || phoneMatch
+    })
+  }, [sortedQueue, queueFilter, queueSearch])
 
   async function saveEvent(event: FormEvent) {
     event.preventDefault()
@@ -377,7 +406,16 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     } finally { setBusy(false) }
   }
 
-  return <main className="dashboard">
+  const visibleQueueIds = filteredQueue.map((item) => item.id)
+  const allVisibleSelected = visibleQueueIds.length > 0 && visibleQueueIds.every((id) => selectedQueueIds.includes(id))
+  function selectVisibleQueue(checked: boolean) {
+    const visibleIds = new Set(visibleQueueIds)
+    setSelectedQueueIds((current) => checked
+      ? [...new Set([...current, ...visibleQueueIds])]
+      : current.filter((id) => !visibleIds.has(id)))
+  }
+
+  return <main className={'dashboard' + (selectedEvent ? ' has-selected-event' : '')}>
     {mobileMenuOpen && <button type="button" className="sidebar-backdrop" aria-label="Fechar menu" onClick={() => setMobileMenuOpen(false)} />}
     <aside className={'sidebar' + (mobileMenuOpen ? ' is-open' : '')}>
       <a className="brand" href="/events" onClick={(event) => { event.preventDefault(); navigateFromMobileMenu('/events') }}>🎃 fila<span>do</span><br /> halloween</a>
@@ -407,7 +445,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         </div>
         <div className="section-head"><div><h2>Seus eventos</h2><p>Selecione um evento para abrir a fila.</p></div><label className="inactive-toggle"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Inativos</label></div>
         {visibleEvents.length ? <div className="event-grid">{visibleEvents.map((event) =>
-          <button className="event-card" key={event.id} onClick={() => { setMobileMenuOpen(false); setQueue([]); setQueueLoading(true); setError(''); navigate('/events/' + encodeURIComponent(event.id)); setMessage('') }}>
+          <button className="event-card" key={event.id} onClick={() => { setMobileMenuOpen(false); setQueue([]); setQueueSearch(''); setQueueFilter('all'); setSelectedQueueIds([]); setQueueLoading(true); setError(''); navigate('/events/' + encodeURIComponent(event.id)); setMessage('') }}>
             <div className="cover" style={event.imagem_capa ? { backgroundImage: 'linear-gradient(180deg, transparent, #17131de8), url(' + event.imagem_capa + ')' } : undefined}><span>● {event.status === 'ativo' ? 'Ativo' : 'Inativo'}</span><b>🎃</b></div>
             <div className="event-info"><small>{new Date(event.data).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })}</small><h3>{event.nome}</h3><p>{event.descricao || 'Um evento especial está esperando por você.'}</p><div>/{event.slug}<span>↗</span></div></div>
           </button>
@@ -418,13 +456,19 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
           <div className="waiting-stat"><small>Aguardando</small><b>{queueLoading ? '…' : waitingCount}</b><span>pessoas</span></div>
           <button className="call-next" disabled={busy || queueLoading || selectedEvent.status !== 'ativo'} onClick={() => void callNext()}>📣 <b>{busy ? 'Chamando...' : 'Chamar próximo'}<small>Avançar em ordem da fila</small></b> →</button>
         </div>
-        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="secondary share-event-button" onClick={() => void shareSelectedEvent()}>↗ Compartilhar evento</button><button className="secondary qr-event-button" onClick={() => setEventQrOpen(true)}>▦ Gerar QR Code</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
-        {!queueLoading && queue.length > 0 && <div className="queue-selection-toolbar">
-          <label className="queue-select-all"><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> <span>Selecionar todos</span></label>
+        <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Atualização automática a cada 6 segundos.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="secondary share-event-button" onClick={() => void shareSelectedEvent()}>↗ Compartilhar evento</button><button className="secondary qr-event-button" onClick={() => setEventQrOpen(true)}>▦ Gerar QR Code</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
+        {!queueLoading && queue.length > 0 && <div className="queue-filters">
+          <label className="queue-search-field">Buscar pessoa<input type="search" value={queueSearch} onChange={(event) => setQueueSearch(event.target.value)} placeholder="Nome, telefone ou senha" aria-label="Buscar na fila por nome, telefone ou senha" /></label>
+          <label className="queue-filter-field">Mostrar<select value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as QueueFilter)} aria-label="Filtrar fila"><option value="all">Todas as pessoas</option><option value="waiting">Na fila</option><option value="serving">Em atendimento</option><option value="unpaid">Pagamento pendente</option></select></label>
+          <span className="queue-result-count">{filteredQueue.length} de {queue.length}</span>
+          {(queueSearch || queueFilter !== 'all') && <button type="button" className="text-button queue-clear-filters" onClick={() => { setQueueSearch(''); setQueueFilter('all') }}>Limpar filtros</button>}
+        </div>}
+        {!queueLoading && filteredQueue.length > 0 && <div className="queue-selection-toolbar">
+          <label className="queue-select-all"><input type="checkbox" checked={allVisibleSelected} onChange={(event) => selectVisibleQueue(event.target.checked)} /> <span>Selecionar exibidos</span></label>
           <span>{selectedQueueIds.length} selecionado{selectedQueueIds.length === 1 ? '' : 's'}</span>
           {selectedQueueIds.length > 0 && <button className="danger-outline queue-delete-button" disabled={busy} onClick={() => void deleteSelectedQueueEntries()}>{busy ? 'Excluindo...' : `Excluir selecionados (${selectedQueueIds.length})`}</button>}
         </div>}
-        {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : queue.length ? <div className="queue-list">{sortedQueue.map((item) =>
+        {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : filteredQueue.length ? <div className="queue-list">{filteredQueue.map((item) =>
           <div key={item.id} className={'queue-row ' + (item.status === 'em atendimento' ? 'currently-serving' : '')}>
             <label className="queue-row-selector" aria-label={`Selecionar senha ${item.ordem_fila}`} onClick={(event) => event.stopPropagation()}>
               <input className="queue-row-select" type="checkbox" checked={selectedQueueIds.includes(item.id)} onChange={(event) => setSelectedQueueIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
@@ -436,9 +480,11 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
               <span className="chevron">›</span>
             </button>
           </div>
-        )}</div> : <div className="empty"><span>🦇</span><h3>A fila está vazia</h3><p>As inscrições aparecerão aqui.</p></div>}
+        )}</div> : queue.length > 0 ? <div className="empty queue-no-results"><span>🔎</span><h3>Nenhuma pessoa encontrada</h3><p>Ajuste a busca ou os filtros para ver outros registros.</p><button type="button" className="secondary" onClick={() => { setQueueSearch(''); setQueueFilter('all') }}>Limpar busca e filtros</button></div> : <div className="empty"><span>🦇</span><h3>A fila está vazia</h3><p>As inscrições aparecerão aqui.</p></div>}
       </> }
     </section>
+
+    {selectedEvent && <div className="queue-mobile-call-bar"><button className="call-next" disabled={busy || queueLoading || selectedEvent.status !== 'ativo'} onClick={() => void callNext()}>📣 <b>{busy ? 'Chamando...' : 'Chamar próximo'}<small>{currentServing ? `Em atendimento: senha ${String(currentServing.ordem_fila).padStart(2, '0')}` : 'Avançar em ordem da fila'}</small></b> →</button></div>}
 
     {createUserOpen && <AdminCreateUserModal events={events} initialEventId={createUserEventId ?? routeEventId} onClose={closeCreateUser} onCreated={(email, eventId) => { closeCreateUser(); setMessage(eventId ? 'Convite enviado para ' + email + ' e usuário adicionado à fila.' : 'Convite enviado para ' + email + '.'); if (selectedEvent && eventId === selectedEvent.id) void loadQueue(selectedEvent) }} />}
 
@@ -467,6 +513,7 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
     {selectedPerson && <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setSelectedPerson(null) }}>
       <section className="modal"><header><div><small className="eyebrow">DETALHES · SENHA {String(selectedPerson.ordem_fila).padStart(2, '0')}</small><h2>{selectedPerson.profile?.nome ?? selectedPerson.nome ?? 'Participante'}</h2></div><button onClick={() => setSelectedPerson(null)}>×</button></header>
         <div className="details"><span>✉️ {selectedPerson.profile?.email ?? 'Sem e-mail cadastrado'}</span><span>☎️ {selectedPerson.profile?.telefone ?? selectedPerson.telefone ?? 'Sem telefone'}</span><span>🪪 CPF {selectedPerson.profile?.cpf ?? 'Não informado'}</span><span>🎂 Nascimento: {formatBirthDate(selectedPerson.profile?.data_nascimento) ?? 'Não informado'}</span><span>🎈 Idade: {getAge(selectedPerson.profile?.data_nascimento) === null ? 'Não informada' : `${getAge(selectedPerson.profile?.data_nascimento)} anos`}</span></div>
+        {(selectedPerson.profile?.telefone ?? selectedPerson.telefone) ? <a className="whatsapp-button queue-person-whatsapp" href={'https://wa.me/' + (selectedPerson.profile?.telefone ?? selectedPerson.telefone)!.replace(/\D/g, '')} target="_blank" rel="noreferrer">☏ Chamar no WhatsApp</a> : <p className="whatsapp-missing">Não há telefone cadastrado para esta pessoa.</p>}
         <form onSubmit={savePerson}>
           <label>Status<select name="status" defaultValue={selectedPerson.status}>{Object.entries(statuses).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label className="check"><input name="pago" type="checkbox" defaultChecked={selectedPerson.pago} /> Pagamento confirmado</label>
