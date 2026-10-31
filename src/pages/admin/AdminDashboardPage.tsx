@@ -383,18 +383,20 @@ export default function AdminDashboardPage({ profile, themeToggle, pathname, nav
         </div>
         <div className="section-head queue-head"><div><h2>Fila do evento <span>{queueLoading ? '…' : queue.length}</span></h2><p>Clique em uma pessoa para editar os dados.</p></div><label className="queue-sort-control">Ordenar por<select value={queueSort} onChange={(event) => setQueueSort(event.target.value as QueueSort)} aria-label="Ordenar fila"><option value="order-asc">Número: menor para maior</option><option value="order-desc">Número: maior para menor</option><option value="status">Status</option><option value="name">Nome</option></select></label><button className="primary" disabled={queueLoading || selectedEvent.status !== 'ativo'} onClick={() => setAddQueueOpen(true)}>＋ Adicionar à fila</button><button className="secondary" onClick={() => { setEventForm({ ...selectedEvent, data: new Date(selectedEvent.data).toISOString().slice(0, 16) }); setCoverFile(null); setBannerFile(null); setFaviconFile(null); setEventModalOpen(true) }}>✎ Editar evento</button><button className="refresh" disabled={queueLoading} onClick={() => void loadQueue(selectedEvent)} aria-label="Atualizar fila">↻</button></div>
         {!queueLoading && queue.length > 0 && <div className="queue-selection-toolbar">
-          <label><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> Selecionar todos</label>
+          <label className="queue-select-all"><input type="checkbox" checked={queue.length > 0 && queue.every((item) => selectedQueueIds.includes(item.id))} onChange={(event) => setSelectedQueueIds(event.target.checked ? queue.map((item) => item.id) : [])} /> <span>Selecionar todos</span></label>
           <span>{selectedQueueIds.length} selecionado{selectedQueueIds.length === 1 ? '' : 's'}</span>
           {selectedQueueIds.length > 0 && <button className="danger-outline queue-delete-button" disabled={busy} onClick={() => void deleteSelectedQueueEntries()}>{busy ? 'Excluindo...' : `Excluir selecionados (${selectedQueueIds.length})`}</button>}
         </div>}
         {queueLoading ? <div className="queue-list queue-list-skeleton" aria-label="Carregando fila">{Array.from({ length: 5 }, (_, index) => <div className="queue-skeleton-row" key={index}><span className="loading-skeleton skeleton-position"/><span className="loading-skeleton skeleton-avatar"/><span className="skeleton-person"><i className="loading-skeleton skeleton-line wide"/><i className="loading-skeleton skeleton-line short"/></span><span className="loading-skeleton skeleton-pill"/></div>)}</div> : queue.length ? <div className="queue-list">{sortedQueue.map((item) =>
           <div key={item.id} className={'queue-row ' + (item.status === 'em atendimento' ? 'currently-serving' : '')}>
-            <input className="queue-row-select" type="checkbox" checked={selectedQueueIds.includes(item.id)} onChange={(event) => setSelectedQueueIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} aria-label={`Selecionar senha ${item.ordem_fila}`} />
+            <label className="queue-row-selector" aria-label={`Selecionar senha ${item.ordem_fila}`} onClick={(event) => event.stopPropagation()}>
+              <input className="queue-row-select" type="checkbox" checked={selectedQueueIds.includes(item.id)} onChange={(event) => setSelectedQueueIds((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
+            </label>
             <button className="queue-row-content" onClick={() => setSelectedPerson(item)}>
               <b className="position">{String(item.ordem_fila).padStart(2, '0')}</b><span className="person-avatar">{(item.profile?.nome ?? item.nome)?.[0]?.toUpperCase() ?? '?'}</span>
-            <span className="person-name"><b>{item.profile?.nome ?? item.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.profile?.telefone ?? item.telefone ?? 'Cadastro público'}</small></span>
-              <span className={item.pago ? 'paid' : 'unpaid'}>{item.pago ? '✓ Pago' : '◷ Pendente'}</span>
-              <span className={'pill state-' + item.status.replaceAll(' ', '-')}>{statuses[item.status] ?? item.status}</span><span className="chevron">›</span>
+              <span className="person-name"><b>{item.profile?.nome ?? item.nome ?? 'Participante'}</b><small>{item.profile?.email ?? item.profile?.telefone ?? item.telefone ?? 'Cadastro público'}</small></span>
+              <span className="queue-row-meta"><span className={item.pago ? 'paid' : 'unpaid'}>{item.pago ? '✓ Pago' : '◷ Pendente'}</span><span className={'pill state-' + item.status.replaceAll(' ', '-')}>{statuses[item.status] ?? item.status}</span></span>
+              <span className="chevron">›</span>
             </button>
           </div>
         )}</div> : <div className="empty"><span>🦇</span><h3>A fila está vazia</h3><p>As inscrições aparecerão aqui.</p></div>}

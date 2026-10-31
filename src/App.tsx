@@ -34,8 +34,12 @@ export default function App() {
     const url = appUrl(to)
     if (replace) window.history.replaceState(null, '', url)
     else if (window.location.pathname !== url) window.history.pushState(null, '', url)
-    setPathname(to)
-    window.scrollTo({ top: 0, behavior: 'instant' })
+    // Derive the route from the URL actually written so base paths (GitHub Pages)
+    // and mobile browsers stay in sync with the rendered screen.
+    setPathname(appPathname(window.location.pathname))
+    // The non-standard `instant` behavior can fail on mobile Safari and interrupt
+    // the SPA transition after history has already changed.
+    window.scrollTo(0, 0)
   }, [])
 
   const loadProfile = useCallback(async (authUser: User | null) => {
